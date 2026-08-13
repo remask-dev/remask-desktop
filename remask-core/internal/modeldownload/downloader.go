@@ -33,6 +33,7 @@ type Config struct {
 type remoteFile struct{ key, remote, local string }
 
 type repoInfo struct {
+	Sha      string `json:"sha"`
 	Siblings []struct {
 		Name string `json:"rfilename"`
 	} `json:"siblings"`
@@ -40,9 +41,11 @@ type repoInfo struct {
 
 // Download writes a complete, checksummed Remask model package. It is safe to
 // retry: each large object is first written to a .part file and supports Range.
+// Variant is optional: an empty variant downloads the repository default model
+// (model.onnx) instead of a quantized build.
 func Download(ctx context.Context, cfg Config) (string, error) {
-	if cfg.Root == "" || cfg.ID == "" || cfg.Repo == "" || cfg.Variant == "" {
-		return "", errors.New("root, id, repo, and variant are required")
+	if cfg.Root == "" || cfg.ID == "" || cfg.Repo == "" {
+		return "", errors.New("root, id, and repo are required")
 	}
 	if parsed, err := url.Parse(cfg.Repo); err == nil && parsed.IsAbs() {
 		if parsed.Host == "" || parsed.Path == "" {
@@ -72,7 +75,7 @@ func Download(ctx context.Context, cfg Config) (string, error) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err
 	}
-	available, err := listRepoFiles(ctx, cfg)
+	available, sha, err := listRepoFiles(ctx, cfg)
 	if err != nil {
 		return "", fmt.Errorf("list repository files: %w", err)
 	}
@@ -127,8 +130,18 @@ func Download(ctx context.Context, cfg Config) (string, error) {
 	} else if tokenizerJSONLooksO200k(filepath.Join(directory, specs["tokenizer"].Path)) {
 		tokenizerType = "o200k-base"
 	}
+	// Prefer the concrete commit the files were fetched from so the recorded
+	// version is the real model revision instead of a branch name such as main.
+	version := sha
+	if version == "" {
+		version = cfg.Revision
+	}
+	quantization := cfg.Variant
+	if quantization == "" {
+		quantization = "default"
+	}
 	manifest := model.Manifest{
-		SchemaVersion: 1, ID: cfg.ID, Name: cfg.Name, Version: cfg.Revision, Task: "token-classification", Quantization: cfg.Variant, LabelScheme: labelScheme, MaxTokens: maxTokens, Stride: stride, Files: specs,
+		SchemaVersion: 1, ID: cfg.ID, Name: cfg.Name, Version: version, Task: "token-classification", Quantization: quantization, LabelScheme: labelScheme, MaxTokens: maxTokens, Stride: stride, Files: specs,
 		Inputs: model.InputSpec{InputIDs: "input_ids", AttentionMask: "attention_mask", TokenTypeIDs: tokenTypeIDs}, Outputs: model.OutputSpec{Logits: "logits"},
 		Tokenizer:   model.TokenizerSpec{Type: tokenizerType, LowerCase: tokenizerType == "bert-wordpiece", StripAccents: tokenizerType == "bert-wordpiece", TokenizeChineseChars: tokenizerType == "bert-wordpiece", UnknownToken: "[UNK]", ClassificationToken: "[CLS]", SeparatorToken: "[SEP]", PaddingToken: "[PAD]"},
 		Decoder:     model.DecoderSpec{Type: decoderType, OperatingPoint: "default"},
@@ -244,11 +257,11 @@ func downloadFile(ctx context.Context, client *http.Client, url, destination, to
 	return os.Rename(temporary, destination)
 }
 
-func listRepoFiles(ctx context.Context, cfg Config) (map[string]bool, error) {
+func listRepoFiles(ctx context.Context, cfg Config) (map[string]bool, string, error) {
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/api/models/" + strings.Trim(cfg.Repo, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("User-Agent", "remask-model-downloader/1.0")
 	if cfg.Token != "" {
@@ -256,26 +269,29 @@ func listRepoFiles(ctx context.Context, cfg Config) (map[string]bool, error) {
 	}
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %s", resp.Status)
+		return nil, "", fmt.Errorf("HTTP %s", resp.Status)
 	}
 	var info repoInfo
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	files := make(map[string]bool, len(info.Siblings))
 	for _, item := range info.Siblings {
 		files[item.Name] = true
 	}
-	return files, nil
+	return files, info.Sha, nil
 }
 
 func selectFiles(available map[string]bool, variant string) ([]remoteFile, error) {
 	modelRemote := ""
-	preferred := []string{"onnx/model_" + variant + ".onnx", "onnx/model_q4.onnx", "onnx/model.onnx", "model.onnx"}
+	preferred := []string{"onnx/model.onnx", "onnx/model_q4.onnx", "model.onnx"}
+	if variant != "" {
+		preferred = []string{"onnx/model_" + variant + ".onnx", "onnx/model.onnx", "onnx/model_q4.onnx", "model.onnx"}
+	}
 	for _, candidate := range preferred {
 		if available[candidate] {
 			modelRemote = candidate

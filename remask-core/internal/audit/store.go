@@ -18,13 +18,13 @@ import (
 const timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 type Settings struct {
-	RecordRequestLogs bool   `json:"record_request_logs"`
-	RetentionDays     int    `json:"retention_days"`
-	HFBaseURL         string `json:"hf_base_url,omitempty"`
+	RecordRequestContent bool   `json:"record_request_content"`
+	RetentionDays        int    `json:"retention_days"`
+	HFBaseURL            string `json:"hf_base_url,omitempty"`
 }
 
 func DefaultSettings() Settings {
-	return Settings{RecordRequestLogs: true, RetentionDays: 30}
+	return Settings{RecordRequestContent: true, RetentionDays: 30}
 }
 
 func (s Settings) Validate() error {
@@ -106,6 +106,11 @@ type Stats struct {
 	Streaming      int            `json:"streaming_requests"`
 	EntityTypes    map[string]int `json:"entity_types"`
 	Daily          []DailyPoint   `json:"daily"`
+	TokenInput     int            `json:"token_input"`
+	TokenOutput    int            `json:"token_output"`
+	TokenTotal     int            `json:"token_total"`
+	TokenCached    int            `json:"token_cached"`
+	TokensPerMin   float64        `json:"tokens_per_minute"`
 }
 
 type Store struct {
@@ -235,17 +240,20 @@ func (s *Store) Configure(settings Settings) error {
 }
 
 func (s *Store) Add(entry Entry) error {
-	s.mu.RLock()
-	settings := s.settings
-	s.mu.RUnlock()
-	if !settings.RecordRequestLogs {
-		return nil
-	}
 	if entry.ID == "" {
 		entry.ID = "req_" + randomID()
 	}
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
+	}
+	// Request logs are always recorded as metadata. The content toggle only
+	// controls whether masked field previews and AI-bound payloads are kept;
+	// aggregate counters such as entity_count stay intact for statistics.
+	s.mu.RLock()
+	settings := s.settings
+	s.mu.RUnlock()
+	if !settings.RecordRequestContent {
+		entry.Fields = nil
 	}
 	sortFields(entry.Fields)
 	fields, err := json.Marshal(entry.Fields)
@@ -354,14 +362,22 @@ func (s *Store) Stats(days int) Stats {
 	startText := start.Format(timestampLayout)
 	var success int
 	var averageLatency float64
+	var activeMinutes int
 	_ = s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(entity_count), 0),
 		COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END), 0),
-		COALESCE(AVG(duration_ms), 0), COALESCE(SUM(streaming), 0)
+		COALESCE(AVG(duration_ms), 0), COALESCE(SUM(streaming), 0),
+		COALESCE(SUM(token_input), 0), COALESCE(SUM(token_output), 0),
+		COALESCE(SUM(token_total), 0), COALESCE(SUM(token_cached), 0),
+		COUNT(DISTINCT substr(timestamp, 1, 16))
 		FROM audit_entries WHERE timestamp >= ?`, startText).Scan(
-		&result.Requests, &result.Entities, &success, &averageLatency, &result.Streaming)
+		&result.Requests, &result.Entities, &success, &averageLatency, &result.Streaming,
+		&result.TokenInput, &result.TokenOutput, &result.TokenTotal, &result.TokenCached, &activeMinutes)
 	result.AverageLatency = int64(averageLatency)
 	if result.Requests > 0 {
 		result.SuccessRate = float64(success) / float64(result.Requests)
+	}
+	if activeMinutes > 0 {
+		result.TokensPerMin = float64(result.TokenTotal) / float64(activeMinutes)
 	}
 	rows, err := s.db.Query(`SELECT substr(timestamp, 1, 10), COUNT(*), COALESCE(SUM(entity_count), 0)
 		FROM audit_entries WHERE timestamp >= ? GROUP BY substr(timestamp, 1, 10)`, startText)
@@ -422,6 +438,23 @@ func (s *Store) loadSettings() error {
 	}
 	if err != nil {
 		return err
+	}
+	// Migrate the pre-content-toggle setting name (record_request_logs) so a
+	// user who disabled logging before this rename keeps their choice.
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if _, exists := raw["record_request_content"]; !exists {
+		if legacy, ok := raw["record_request_logs"].(bool); ok {
+			raw["record_request_content"] = legacy
+		}
+		delete(raw, "record_request_logs")
+		migrated, err := json.Marshal(raw)
+		if err != nil {
+			return err
+		}
+		data = migrated
 	}
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {

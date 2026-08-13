@@ -10,8 +10,8 @@ export interface AuditField { path: string; original_masked: string; redacted: s
 export interface TokenUsage { input: number; output: number; total: number; cached?: number }
 export interface AuditLog { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; protection_mode?: "redacted" | "passthrough" | "disabled"; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; fields?: AuditField[]; error_code?: string }
 export interface DailyStat { date: string; requests: number; entities: number }
-export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[] }
-export interface AuditSettings { record_request_logs: boolean; retention_days: number; hf_base_url?: string }
+export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[]; token_input: number; token_output: number; token_total: number; token_cached: number; tokens_per_minute: number }
+export interface AuditSettings { record_request_content: boolean; retention_days: number; hf_base_url?: string }
 export interface ModelDownloadRequest { repo: string; revision?: string; variant?: string; id?: string; name?: string; base_url?: string }
 export interface ModelCatalogEntry { id: string; name: string; project_url: string; repo: string; revision: string; variant: string }
 export interface PIIEntity { type: string; replacement: string; confidence: number; sources: string[] }
@@ -19,5 +19,5 @@ export interface RedactResult { text: string; scope_id: string; replacement_coun
 export interface RuleConfig { id: string; pattern: string; enabled: boolean }
 export interface EntityTypeConfig { type: string; enabled: boolean }
 export interface PolicySettings { enabled: boolean; redact_ai_answers: boolean; entity_types: EntityTypeConfig[]; rules: RuleConfig[] }
-export interface Operation { id: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; error?: string }
-export interface BootstrapData { version: VersionResponse; profiles: Profile[]; upstreams: Upstream[]; models: ModelPackage[]; modelCatalog: ModelCatalogEntry[]; runtime: RuntimeStatus; activeModel: ActiveModel | null; settings: AuditSettings; policy: PolicySettings; stats: AuditStats; logs: AuditLog[] }
+export interface Operation { id: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; progress?: number; message?: string; error?: string }
+export interface BootstrapData { version: VersionResponse; profiles: Profile[]; upstreams: Upstream[]; models: ModelPackage[]; runtime: RuntimeStatus; activeModel: ActiveModel | null; settings: AuditSettings; policy: PolicySettings; stats: AuditStats; logs: AuditLog[] }

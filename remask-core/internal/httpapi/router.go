@@ -347,16 +347,17 @@ func (r *Router) downloadModel(w http.ResponseWriter, request *http.Request) {
 	if input.Revision == "" {
 		input.Revision = "main"
 	}
-	if input.Variant == "" {
-		input.Variant = "q4f16"
-	}
+	input.Variant = strings.TrimSpace(input.Variant)
 	if input.ID == "" {
 		repoID := input.Repo
 		if parsed, err := url.Parse(input.Repo); err == nil && parsed.IsAbs() {
 			repoID = parsed.Path
 		}
 		repoID = strings.Trim(repoID, "/")
-		input.ID = strings.NewReplacer("/", "-", "\\", "-", " ", "-", ".", "-").Replace(repoID) + "-" + input.Variant
+		input.ID = strings.NewReplacer("/", "-", "\\", "-", " ", "-", ".", "-").Replace(repoID)
+		if input.Variant != "" {
+			input.ID += "-" + input.Variant
+		}
 	}
 	if input.Name == "" {
 		input.Name = input.ID
@@ -370,16 +371,24 @@ func (r *Router) downloadModel(w http.ResponseWriter, request *http.Request) {
 	}
 	op, ctx := r.operations.Create("model.download")
 	go func() {
-		_ = r.operations.Update(op.ID, func(item *operation.Operation) {
+		progress := func(item *operation.Operation) {
 			item.Status = operation.StatusRunning
-			item.Progress = 5
 			item.Message = "downloading model"
+		}
+		_ = r.operations.Update(op.ID, func(item *operation.Operation) {
+			progress(item)
+			item.Progress = 5
 		})
 		directory, err := modeldownload.Download(ctx, modeldownload.Config{Root: r.models.Root(), ID: input.ID, Name: input.Name, Repo: input.Repo, Revision: input.Revision, Variant: input.Variant, BaseURL: input.BaseURL})
 		if err != nil {
 			_ = r.operations.Fail(op.ID, err)
 			return
 		}
+		_ = r.operations.Update(op.ID, func(item *operation.Operation) {
+			progress(item)
+			item.Progress = 85
+			item.Message = "validating model"
+		})
 		if _, err = r.models.Scan(ctx); err != nil {
 			_ = r.operations.Fail(op.ID, err)
 			return

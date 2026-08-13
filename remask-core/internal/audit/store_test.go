@@ -48,21 +48,35 @@ func TestStorePersistsAndAggregatesMaskedAudit(t *testing.T) {
 	}
 }
 
-func TestStoreHonorsDisabledSetting(t *testing.T) {
+func TestStoreKeepsMetadataWhenContentDisabled(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	settings := DefaultSettings()
-	settings.RecordRequestLogs = false
+	settings.RecordRequestContent = false
 	if err := store.Configure(settings); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Add(Entry{UpstreamID: "ignored"}); err != nil {
+	if err := store.Add(Entry{
+		UpstreamID: "openai", ProfileID: "openai", StatusCode: 200, EntityCount: 2,
+		Fields: []Field{{Path: "/messages/0/content", OriginalMasked: "联系 [PHONE_NUMBER]"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if logs := store.List(Query{}); len(logs) != 0 {
-		t.Fatalf("disabled store recorded logs: %#v", logs)
+	logs := store.List(Query{Limit: 10})
+	if len(logs) != 1 {
+		t.Fatalf("content toggle must not disable metadata logging, got %#v", logs)
+	}
+	if len(logs[0].Fields) != 0 {
+		t.Fatalf("field content must not be stored when disabled: %#v", logs[0].Fields)
+	}
+	if logs[0].EntityCount != 2 {
+		t.Fatalf("aggregate entity count must survive content toggle: %#v", logs[0])
+	}
+	stats := store.Stats(7)
+	if stats.Requests != 1 || stats.Entities != 2 {
+		t.Fatalf("stats must ignore content toggle: %#v", stats)
 	}
 }
 
