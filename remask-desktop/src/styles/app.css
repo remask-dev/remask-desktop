@@ -1,0 +1,43 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./shell.css";
+@import "./components.css";
+@import "./features.css";
+@import "./details.css";
+@import "./refinement.css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-surface);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent-surface);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * { @apply border-border; }
+  html, body, #root { @apply size-full overflow-hidden; }
+  body { @apply bg-background text-foreground antialiased; }
+  button, input, select, textarea { font: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  code, pre { font-family: "SFMono-Regular", Consolas, monospace; }
+  :focus-visible { @apply outline-none ring-2 ring-ring ring-offset-1 ring-offset-background; }
+}

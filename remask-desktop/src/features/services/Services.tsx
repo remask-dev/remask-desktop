@@ -1,0 +1,33 @@
+import { Copy, KeyRound, Plus, Server } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { connection, coreApi } from "../../shared/api/client";
+import type { BootstrapData, Upstream } from "../../shared/api/types";
+import { useApp } from "../../app/AppContext";
+import { useI18n } from "../../shared/i18n/I18n";
+import { Badge } from "../../shared/ui/Status";
+import { Button } from "../../shared/ui/Button";
+import { Dialog } from "../../shared/ui/Dialog";
+import { Input } from "../../shared/ui/Input";
+import { Select } from "../../shared/ui/Select";
+
+const blankService:Upstream={id:"",base_url:"",profile_id:"openai",credential_mode:"passthrough"};
+export function Services({data}:{data:BootstrapData}){
+  const {t}=useI18n();const {notify}=useApp();const qc=useQueryClient();
+  const [selected,setSelected]=useState(data.upstreams[0]?.id||"");const [editing,setEditing]=useState<Upstream|null>(null);const [confirm,setConfirm]=useState<string|null>(null);
+  const current=data.upstreams.find(x=>x.id===selected)||data.upstreams[0];
+  const remove=useMutation({mutationFn:coreApi.deleteUpstream,onSuccess:()=>{setConfirm(null);setSelected("");qc.invalidateQueries();},onError:error=>notify(String(error))});
+  function newService(){setEditing({...blankService});}
+  async function copy(v:string){await navigator.clipboard.writeText(v);notify(t("copied"));}
+  return <div className="split-view services-view"><section className="list-pane"><div className="pane-title"><div><span>{t("configured")}</span><small>{data.upstreams.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={newService}>{t("addService")}</Button></div><div className="service-list">{data.upstreams.map(item=><button key={item.id} className={current?.id===item.id?"selected":""} onClick={()=>setSelected(item.id)}><span className="service-icon"><Server size={15}/></span><div><strong>{item.id}</strong><code>{item.base_url}</code><small>{item.profile_id}</small></div><Badge tone="success">{t("available")}</Badge></button>)}</div></section><section className="detail-pane">{current?<><header className="detail-header"><div><span>{t("services")}</span><h2>{current.id}</h2><code>{current.base_url}</code></div><div className="header-actions"><Button onClick={()=>setEditing({...current})}>{t("edit")}</Button><Button variant="danger" onClick={()=>setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section gateway-options"><h3>{t("proxyMethods")}</h3><GatewayAddress label={t("serviceIdRoute")} value={`${connection.proxy()}/proxy/${current.id}`} onCopy={copy}/><GatewayAddress label={t("domainRoute")} value={`${connection.proxy()}/proxy/${upstreamDomain(current.base_url)}`} onCopy={copy}/><GatewayAddress label={t("autoRoute")} value={connection.proxy()} onCopy={copy}/><p>{t("autoRouteNote")}</p></section><section className="detail-section"><h3>{t("summary")}</h3><dl className="property-grid"><div><dt>{t("profile")}</dt><dd>{current.profile_id}</dd></div><div><dt>{t("credential")}</dt><dd>{current.credential_mode==="managed"?t("managed"):t("pass")}</dd></div></dl></section></>:<div className="detail-empty"><span className="detail-empty__icon"><Server size={24}/></span><h2>{t("addService")}</h2><p>{t("serviceEmpty")}</p><Button variant="primary" onClick={newService}>{t("addService")}</Button></div>}</section><ServiceDialog item={editing} data={data} onClose={()=>setEditing(null)}/><Dialog open={!!confirm} title={t("confirmDelete")} onClose={()=>setConfirm(null)} footer={<><Button onClick={()=>setConfirm(null)}>{t("cancel")}</Button><Button variant="danger" onClick={()=>confirm&&remove.mutate(confirm)}>{t("confirm")}</Button></>}><p className="dialog-message">{confirm}</p></Dialog></div>
+}
+
+function GatewayAddress({label,value,onCopy}:{label:string;value:string;onCopy:(value:string)=>void}){return <button className="copy-field copy-field--labeled" onClick={()=>onCopy(value)}><span><small>{label}</small><code>{value}</code></span><Copy size={14}/></button>}
+function upstreamDomain(baseUrl:string){try{return new URL(baseUrl).hostname}catch{return baseUrl}}
+function ServiceDialog({item,data,onClose}:{item:Upstream|null;data:BootstrapData;onClose:()=>void}){const {t}=useI18n();const qc=useQueryClient();const editing=!!item&&data.upstreams.some(x=>x.id===item.id);const [form,setForm]=useState<Upstream>(item||blankService);
+  // The dialog component stays mounted while switching between services. Keep
+  // the controlled fields in sync with the newly selected service; otherwise
+  // React would retain the previous (often blank) form state.
+  useEffect(()=>{setForm(item?{...item}:{...blankService})},[item]);
+  const profile=data.profiles.find(p=>p.id===form.profile_id);const save=useMutation({mutationFn:()=>coreApi.putUpstream(form,editing),onSuccess:()=>{qc.invalidateQueries();onClose();}});if(!item)return null;return <Dialog open title={editing?t("edit"):t("addService")} description={t("credentialSafety")} onClose={onClose} footer={<><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={()=>save.mutate()} disabled={!form.id||!form.base_url}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("serviceId")}><Input value={form.id} disabled={editing} onChange={e=>setForm({...form,id:e.target.value})}/></Field><Field label={t("upstreamUrl")}><Input type="url" value={form.base_url} onChange={e=>setForm({...form,base_url:e.target.value})}/></Field><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={value=>setForm({...form,profile_id:value})} options={data.profiles.map(p=>({value:p.id,label:p.name}))}/></Field><Field label={t("credential")}><Select value={form.credential_mode} onValueChange={value=>setForm({...form,credential_mode:value as Upstream["credential_mode"],api_key:value==="managed"?form.api_key:undefined})} options={[{value:"passthrough",label:t("pass")},{value:"managed",label:t("managed")}]}/></Field>{form.credential_mode==="managed"&&<Field label={t("apiKey")}><Input type="password" value={form.api_key==="••••••••"?"":form.api_key||""} onChange={e=>setForm({...form,api_key:e.target.value})} placeholder={profile?.header_templates?Object.values(profile.header_templates).find(v=>v.includes("{{api_key}}"))||"sk-…":"sk-…"}/></Field>}<div className="credential-note"><KeyRound size={14}/>{t("credentialTemplateNote")}</div></div></Dialog>}
+function Field({label,children}:{label:string;children:React.ReactNode}){return <label className="field"><span>{label}</span>{children}</label>}

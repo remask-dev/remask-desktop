@@ -1,0 +1,161 @@
+package model
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/remask/remask-core/internal/operation"
+	"github.com/remask/remask-core/internal/pii"
+)
+
+func TestScanValidatesModelPackage(t *testing.T) {
+	root := t.TempDir()
+	createTestPackage(t, root, "privacy-q4")
+	manager := NewManager(root, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	packages, err := manager.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 1 || !packages[0].Valid || packages[0].ID != "privacy-q4" {
+		t.Fatalf("unexpected packages: %#v", packages)
+	}
+}
+
+func TestScanIgnoresNestedModelPackages(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "publisher", "model", "q4")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createTestPackage(t, filepath.Dir(nested), filepath.Base(nested))
+	manager := NewManager(root, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	packages, err := manager.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 0 {
+		t.Fatalf("nested packages must be ignored: %#v", packages)
+	}
+}
+
+func TestScanRejectsDirectoryAndManifestIDMismatch(t *testing.T) {
+	root := t.TempDir()
+	createTestPackage(t, root, "manifest-id")
+	if err := os.Rename(filepath.Join(root, "manifest-id"), filepath.Join(root, "directory-id")); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(root, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	packages, err := manager.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 1 || packages[0].Valid {
+		t.Fatalf("mismatched package must be invalid: %#v", packages)
+	}
+}
+
+func TestActivationFailsCleanlyWhenRuntimeUnavailable(t *testing.T) {
+	root := t.TempDir()
+	createTestPackage(t, root, "privacy-q4")
+	operations := operation.NewStore()
+	manager := NewManager(root, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operations)
+	_, _ = manager.Scan(context.Background())
+	op, err := manager.Activate("privacy-q4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		current, getErr := operations.Get(op.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if current.Status == operation.StatusFailed {
+			if _, active := manager.Active(); active {
+				t.Fatal("failed activation must not replace active model")
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("operation did not finish")
+}
+
+func TestActivateSyncLoadsAndMarksModelActive(t *testing.T) {
+	root := t.TempDir()
+	createTestPackage(t, root, "privacy-q4")
+	detector := pii.NewDynamicDetector(pii.NewRuleDetector())
+	manager := NewManager(root, testRuntime{}, detector, operation.NewStore())
+	if _, err := manager.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ActivateSync(context.Background(), "privacy-q4"); err != nil {
+		t.Fatal(err)
+	}
+	active, ok := manager.Active()
+	if !ok || active.ID != "privacy-q4" {
+		t.Fatalf("unexpected active model: %#v, active=%v", active, ok)
+	}
+	packages := manager.List()
+	if len(packages) != 1 || !packages[0].Active {
+		t.Fatalf("package was not marked active: %#v", packages)
+	}
+}
+
+type testRuntime struct{}
+
+func (testRuntime) Name() string    { return "test" }
+func (testRuntime) Available() bool { return true }
+func (testRuntime) Load(_ context.Context, _ string, manifest Manifest) (Session, error) {
+	return &testSession{metadata: Metadata{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Runtime: "test"}}, nil
+}
+
+type testSession struct {
+	metadata Metadata
+}
+
+func (s *testSession) ID() string { return "model:" + s.metadata.ID }
+func (s *testSession) Detect(_ context.Context, _ string) ([]pii.Entity, error) {
+	return []pii.Entity{}, nil
+}
+func (s *testSession) Metadata() Metadata { return s.metadata }
+func (s *testSession) Close() error       { return nil }
+
+func createTestPackage(t *testing.T, root, id string) {
+	t.Helper()
+	directory := filepath.Join(root, id)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{
+		"model.onnx":     []byte("test-model"),
+		"tokenizer.json": []byte(`{"version":"1.0"}`),
+		"labels.json":    []byte(`{"0":"O"}`),
+	}
+	manifestFiles := map[string]FileSpec{}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(directory, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(data)
+		key := map[string]string{"model.onnx": "model", "tokenizer.json": "tokenizer", "labels.json": "labels"}[name]
+		manifestFiles[key] = FileSpec{Path: name, SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
+	}
+	manifest := Manifest{
+		SchemaVersion: 1, ID: id, Name: "Test model", Version: "1.0.0",
+		Task: "token-classification", Quantization: "int4", LabelScheme: "BIO",
+		MaxTokens: 512, Stride: 64, Files: manifestFiles,
+		Inputs:  InputSpec{InputIDs: "input_ids", AttentionMask: "attention_mask"},
+		Outputs: OutputSpec{Logits: "logits"},
+	}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(directory, "manifest.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

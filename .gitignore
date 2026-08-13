@@ -1,0 +1,21 @@
+.DS_Store
+
+# Go build outputs
+/remask-core/remask-core
+/remask-core/coverage.out
+/remask-core/models/
+
+# Desktop generated files
+/remask-desktop/dist/
+/remask-desktop/node_modules/
+/remask-desktop/src-tauri/target/
+/remask-desktop/src-tauri/binaries/*
+!/remask-desktop/src-tauri/binaries/.gitkeep
+/remask-desktop/src-tauri/resources/models/*
+/remask-desktop/src-tauri/resources/models.stage/
+/remask-desktop/src-tauri/resources/model-bundle.json
+!/remask-desktop/src-tauri/resources/models/.gitkeep
+!/remask-desktop/src-tauri/resources/models/README.txt
+/remask-desktop/src-tauri/resources/onnxruntime/*
+!/remask-desktop/src-tauri/resources/onnxruntime/.gitkeep
+!/remask-desktop/src-tauri/resources/onnxruntime/README.txt
