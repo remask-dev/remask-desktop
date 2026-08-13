@@ -19,5 +19,8 @@
         "resizable": true
       }
     ]
+  },
+  "bundle": {
+    "icon": ["icons/app-icon-apple.icns"]
   }
 }

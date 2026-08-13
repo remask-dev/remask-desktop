@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
 struct CoreProcess(Mutex<Option<CommandChild>>);
@@ -46,16 +46,22 @@ fn start_core(
     args.push(proxy_listen_address.to_string());
     let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
     let bundled_resources = resource_dir.join("resources");
-    let models_dir = bundled_resources.join("models");
     let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
     let remask_dir = home_dir.join(".remask");
     std::fs::create_dir_all(&remask_dir).map_err(|error| error.to_string())?;
+    // Bundled models are the initial seed; downloaded models must live in the
+    // writable per-user directory rather than inside the application bundle.
+    let models_dir = remask_dir.join("models");
+    if !models_dir.exists() {
+        if let Err(error) = copy_dir_all(&bundled_resources.join("models"), &models_dir) {
+            if error.kind() != std::io::ErrorKind::NotFound { return Err(error.to_string()); }
+            std::fs::create_dir_all(&models_dir).map_err(|error| error.to_string())?;
+        }
+    }
     args.push("--data-dir".to_string());
     args.push(remask_dir.to_string_lossy().into_owned());
-    if models_dir.is_dir() {
-        args.push("--models-dir".to_string());
-        args.push(models_dir.to_string_lossy().into_owned());
-    }
+    args.push("--models-dir".to_string());
+    args.push(models_dir.to_string_lossy().into_owned());
     if let Some(bundled_model_id) = bundled_active_model(&bundled_resources) {
         args.push("--active-model".to_string());
         args.push(bundled_model_id);
@@ -72,6 +78,17 @@ fn start_core(
         .args(args);
     let (_events, child) = command.spawn().map_err(|error| error.to_string())?;
     *process = Some(child);
+    Ok(())
+}
+
+fn copy_dir_all(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let target = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() { copy_dir_all(&entry.path(), &target)?; }
+        else { std::fs::copy(entry.path(), target)?; }
+    }
     Ok(())
 }
 
@@ -114,6 +131,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(CoreProcess(Mutex::new(None)))
+        .setup(|app| {
+            let window = if let Some(window) = app.get_webview_window("main") {
+                window
+            } else {
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Remask")
+                    .inner_size(1040.0, 650.0)
+                    .min_inner_size(640.0, 560.0)
+                    .visible(false)
+                    .build()?
+            };
+            window.show()?;
+            window.unminimize()?;
+            window.set_focus()?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![start_core, stop_core])
         .run(tauri::generate_context!())
         .expect("error while running remask-desktop");

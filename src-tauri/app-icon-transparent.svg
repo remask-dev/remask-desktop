@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 31" role="img" aria-labelledby="title desc">
+  <title id="title">Remask</title>
+  <desc id="desc">Remask mark with a transparent background.</desc>
+
+  <!-- Transparent canvas; only the mark is rendered. -->
+  <g>
+    <rect x="5" y="7" width="7" height="3" rx="1.5" fill="#9CB8CE"/>
+    <rect x="13" y="7" width="13" height="3" rx="1.5" fill="#F7FAFC"/>
+
+    <rect x="5" y="14" width="13" height="3" rx="1.5" fill="#F7FAFC"/>
+    <rect x="19" y="14" width="7" height="3" rx="1.5" fill="#9CB8CE"/>
+
+    <rect x="5" y="21" width="7" height="3" rx="1.5" fill="#9CB8CE"/>
+    <rect x="13" y="21" width="13" height="3" rx="1.5" fill="#F7FAFC"/>
+  </g>
+</svg>

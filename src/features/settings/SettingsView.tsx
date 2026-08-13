@@ -1,4 +1,4 @@
-import { LockKeyhole, Network, ShieldCheck } from "lucide-react";
+import { DownloadCloud, LockKeyhole, Network, ShieldCheck } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
@@ -20,6 +20,7 @@ export function SettingsView({ data }: { data: BootstrapData }) {
   const [audit, setAudit] = useState<AuditSettings>(data.settings);
   const [policy, setPolicy] = useState<PolicySettings>(data.policy);
   const [clear, setClear] = useState(false);
+  const [hfBaseURL, setHFBaseURL] = useState(data.settings.hf_base_url || "");
 
   const savePolicy = useMutation({
     mutationFn: (next: PolicySettings) => coreApi.savePolicy(next),
@@ -64,6 +65,7 @@ export function SettingsView({ data }: { data: BootstrapData }) {
     saveAudit.mutate(next);
   }
   function applyGatewayPort() { if (!saveGateway.isPending) saveGateway.mutate(gatewayPort); }
+  function applyHFBaseURL() { const next = { ...audit, hf_base_url: hfBaseURL.trim() }; setAudit(next); saveAudit.mutate(next); }
 
   return <div className="settings-page"><div className="settings-grid">
     <SettingsSection tone="gateway" icon={<Network/>} title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
@@ -71,6 +73,9 @@ export function SettingsView({ data }: { data: BootstrapData }) {
     </SettingsSection>
     <SettingsSection tone="interface" icon={<span className="language-glyph">文</span>} title={t("interfaceSettings")} subtitle={t("interfaceSettingsSub")}>
       <SettingRow last label={t("language")} description={locale === "zh" ? "简体中文" : "English"}><Select value={locale} onValueChange={value => setLocale(value as "zh" | "en")} options={[{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }]}/></SettingRow>
+    </SettingsSection>
+    <SettingsSection tone="models" icon={<DownloadCloud/>} title={t("modelDownloads")} subtitle={t("modelDownloadsSub")}>
+      <SettingRow last label={t("hfMirror")} description={t("hfMirrorSub")}><Input placeholder="https://huggingface.co" value={hfBaseURL} onChange={event => setHFBaseURL(event.target.value)} onBlur={applyHFBaseURL} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="protection" icon={<ShieldCheck/>} title={t("protectionSettings")} subtitle={t("protectionSettingsSub")}>
       <SettingRow last label={t("redactAIAnswers")} description={t("redactAIAnswersSub")}><Switch ariaLabel={t("redactAIAnswers")} disabled={savePolicy.isPending} checked={policy.redact_ai_answers} onCheckedChange={redact_ai_answers => updatePolicy({ redact_ai_answers })}/></SettingRow>

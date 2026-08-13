@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "stage:core": "bash scripts/stage-core.sh",
+    "icons": "bash scripts/generate-icons.sh",
     "tauri": "tauri"
   },
   "dependencies": {
