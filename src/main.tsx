@@ -7,5 +7,9 @@ import { ErrorBoundary } from "./app/ErrorBoundary";
 import { I18nProvider } from "./shared/i18n/I18n";
 import "./styles/app.css";
 
+const platform = /Windows/i.test(navigator.userAgent) ? "windows" : /Macintosh|Mac OS X/i.test(navigator.userAgent) ? "macos" : "other";
+document.documentElement.dataset.platform = platform;
+document.addEventListener("contextmenu", (event) => event.preventDefault());
+
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 3_000, refetchOnWindowFocus: true } } });
 createRoot(document.getElementById("root")!).render(<StrictMode><ErrorBoundary><QueryClientProvider client={queryClient}><I18nProvider><AppProvider><Shell/></AppProvider></I18nProvider></QueryClientProvider></ErrorBoundary></StrictMode>);
