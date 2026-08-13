@@ -1,29 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 31" role="img" aria-labelledby="title desc">
   <title id="title">Remask</title>
-  <desc id="desc">Abstract lines of data with private fragments replaced by shorter muted lines.</desc>
+  <desc id="desc">Three two-segment data lines with the long white segment alternating right, left, then right.</desc>
 
-  <rect width="512" height="512" rx="112" fill="#1F4268"/>
+  <!-- Full-bleed field: platform tooling applies the final icon mask. -->
+  <rect width="31" height="31" fill="#1F4268"/>
 
-  <!-- Preserved fragments. Their uneven lengths evoke structured data. -->
-  <g fill="#F7FAFC">
-    <rect x="82" y="142" width="142" height="28" rx="14"/>
-    <rect x="326" y="142" width="104" height="28" rx="14"/>
+  <!-- Long white segments alternate between the right and left sides. -->
+  <g>
+    <rect x="5" y="7" width="7" height="3" rx="1.5" fill="#9CB8CE"/>
+    <rect x="13" y="7" width="13" height="3" rx="1.5" fill="#F7FAFC"/>
 
-    <rect x="82" y="208" width="82" height="28" rx="14"/>
-    <rect x="322" y="208" width="108" height="28" rx="14"/>
+    <rect x="5" y="14" width="13" height="3" rx="1.5" fill="#F7FAFC"/>
+    <rect x="19" y="14" width="7" height="3" rx="1.5" fill="#9CB8CE"/>
 
-    <rect x="82" y="274" width="164" height="28" rx="14"/>
-    <rect x="350" y="274" width="80" height="28" rx="14"/>
-
-    <rect x="82" y="340" width="112" height="28" rx="14"/>
-    <rect x="298" y="340" width="132" height="28" rx="14"/>
-  </g>
-
-  <!-- Muted replacement lines mark the fragments removed by masking. -->
-  <g fill="#9CB8CE">
-    <rect x="246" y="142" width="58" height="28" rx="14"/>
-    <rect x="186" y="208" width="114" height="28" rx="14"/>
-    <rect x="268" y="274" width="60" height="28" rx="14"/>
-    <rect x="216" y="340" width="60" height="28" rx="14"/>
+    <rect x="5" y="21" width="7" height="3" rx="1.5" fill="#9CB8CE"/>
+    <rect x="13" y="21" width="13" height="3" rx="1.5" fill="#F7FAFC"/>
   </g>
 </svg>

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/remask/remask-core/internal/audit"
 	"github.com/remask/remask-core/internal/gateway"
 	"github.com/remask/remask-core/internal/model"
+	"github.com/remask/remask-core/internal/modeldownload"
 	"github.com/remask/remask-core/internal/operation"
 	"github.com/remask/remask-core/internal/pii"
 	"github.com/remask/remask-core/internal/profile"
@@ -60,6 +62,8 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 	mux.HandleFunc("DELETE /api/v1/upstreams/{upstream_id}", router.deleteUpstream)
 	mux.HandleFunc("GET /api/v1/models", router.listModels)
 	mux.HandleFunc("POST /api/v1/models/scan", router.scanModels)
+	mux.HandleFunc("GET /api/v1/models/catalog", router.modelCatalog)
+	mux.HandleFunc("POST /api/v1/models/download", router.downloadModel)
 	mux.HandleFunc("GET /api/v1/models/active", router.activeModel)
 	mux.HandleFunc("GET /api/v1/models/{model_id}", router.getModel)
 	mux.HandleFunc("POST /api/v1/models/{model_id}/activate", router.activateModel)
@@ -296,11 +300,15 @@ func (r *Router) auditStats(w http.ResponseWriter, request *http.Request) {
 }
 
 func (r *Router) getSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"audit": r.audits.Settings()})
+	settings := r.audits.Settings()
+	writeJSON(w, http.StatusOK, map[string]any{"audit": settings, "models": map[string]any{"hf_base_url": settings.HFBaseURL}})
 }
 
 type settingsRequest struct {
-	Audit audit.Settings `json:"audit"`
+	Audit  audit.Settings `json:"audit"`
+	Models *struct {
+		HFBaseURL string `json:"hf_base_url"`
+	} `json:"models"`
 }
 
 func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
@@ -308,11 +316,77 @@ func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
 	if !decodeJSON(w, request, &input) {
 		return
 	}
+	if input.Models != nil {
+		input.Audit.HFBaseURL = strings.TrimSpace(input.Models.HFBaseURL)
+	}
 	if err := r.audits.Configure(input.Audit); err != nil {
 		writeError(w, http.StatusBadRequest, "SETTINGS_INVALID", err.Error())
 		return
 	}
 	r.getSettings(w, request)
+}
+
+type modelDownloadRequest struct {
+	Repo     string `json:"repo"`
+	Revision string `json:"revision,omitempty"`
+	Variant  string `json:"variant,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+}
+
+func (r *Router) downloadModel(w http.ResponseWriter, request *http.Request) {
+	var input modelDownloadRequest
+	if !decodeJSON(w, request, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Repo) == "" {
+		writeError(w, http.StatusBadRequest, "MODEL_REPO_REQUIRED", "repo is required")
+		return
+	}
+	if input.Revision == "" {
+		input.Revision = "main"
+	}
+	if input.Variant == "" {
+		input.Variant = "q4f16"
+	}
+	if input.ID == "" {
+		repoID := input.Repo
+		if parsed, err := url.Parse(input.Repo); err == nil && parsed.IsAbs() {
+			repoID = parsed.Path
+		}
+		repoID = strings.Trim(repoID, "/")
+		input.ID = strings.NewReplacer("/", "-", "\\", "-", " ", "-", ".", "-").Replace(repoID) + "-" + input.Variant
+	}
+	if input.Name == "" {
+		input.Name = input.ID
+	}
+	settings := r.audits.Settings()
+	if input.BaseURL == "" {
+		input.BaseURL = settings.HFBaseURL
+	}
+	if input.BaseURL == "" {
+		input.BaseURL = "https://huggingface.co"
+	}
+	op, ctx := r.operations.Create("model.download")
+	go func() {
+		_ = r.operations.Update(op.ID, func(item *operation.Operation) {
+			item.Status = operation.StatusRunning
+			item.Progress = 5
+			item.Message = "downloading model"
+		})
+		directory, err := modeldownload.Download(ctx, modeldownload.Config{Root: r.models.Root(), ID: input.ID, Name: input.Name, Repo: input.Repo, Revision: input.Revision, Variant: input.Variant, BaseURL: input.BaseURL})
+		if err != nil {
+			_ = r.operations.Fail(op.ID, err)
+			return
+		}
+		if _, err = r.models.Scan(ctx); err != nil {
+			_ = r.operations.Fail(op.ID, err)
+			return
+		}
+		_ = r.operations.Complete(op.ID, map[string]any{"model_id": input.ID, "directory": directory})
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"operation_id": op.ID, "model_id": input.ID})
 }
 
 func (r *Router) deleteUpstream(w http.ResponseWriter, request *http.Request) {
@@ -330,6 +404,10 @@ func (r *Router) listModels(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"models": models, "runtime": r.models.RuntimeStatus()})
+}
+
+func (r *Router) modelCatalog(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"models": modeldownload.Catalog()})
 }
 
 func (r *Router) scanModels(w http.ResponseWriter, request *http.Request) {

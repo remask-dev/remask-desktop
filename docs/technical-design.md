@@ -324,10 +324,9 @@ type Detector interface {
 
 长文本采用 tokenizer 滑窗，窗口带重叠。模型 token offset 必须转换回原始 UTF-8 byte offset，再参与实体合并。
 
-当前接入两个可切换模型：
+当前桌面默认内置一个模型；其他模型通过模型目录或 Hugging Face 项目地址下载后可切换：
 
 - `openai-privacy-filter-q4`：固定 revision `7ffa9a043d54d1be65afb281eddf0ffbe629385b`，使用约 907 MB 的 ONNX Q4 external-data 包、`o200k_base` tokenizer、BIOES 标签和受约束 Viterbi 解码。桌面默认使用该模型。
-- `ai4privacy-distilbert-q4`：固定 revision `78dcbb58fbe1ea1a6419c06c4cfff1b4418f1b85`，使用约 117 MB 的 DistilBERT Q4、BERT WordPiece tokenizer 和 BIO 解码，作为较轻量备选。
 
 当前实现包括滑动窗口、重叠预测合并、逐 token softmax 置信度和原始 UTF-8 byte offset 映射。推理后只接受显式支持的 PII 标签映射，未知标签直接丢弃，不能因为模型输出了任意类别就执行脱敏。
 
@@ -358,11 +357,6 @@ models/
 │   ├── labels.json
 │   ├── viterbi_calibration.json
 │   └── manifest.json
-└── ai4privacy-distilbert-q4/
-    ├── model_q4.onnx
-    ├── vocab.txt
-    ├── labels.json
-    └── manifest.json
 ```
 
 Manifest 示例：

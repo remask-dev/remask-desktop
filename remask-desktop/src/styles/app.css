@@ -38,6 +38,7 @@
   button, input, select, textarea { font: inherit; }
   input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
   .logs-view .audit-field pre, .logs-view .audit-field pre * { user-select: text; -webkit-user-select: text; }
+  .test-output, .test-output * { user-select: text; -webkit-user-select: text; }
   button { cursor: pointer; }
   button:disabled { cursor: default; }
   code, pre { font-family: "SFMono-Regular", Consolas, monospace; }

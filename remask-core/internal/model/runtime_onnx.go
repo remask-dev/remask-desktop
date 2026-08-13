@@ -71,6 +71,15 @@ func (r *onnxRuntime) Load(ctx context.Context, packagePath string, manifest Man
 	if err != nil {
 		return nil, fmt.Errorf("load labels: %w", err)
 	}
+	// Older manifests may omit optional BERT segment IDs. If the graph declares
+	// the input, infer it so those packages still run correctly.
+	if manifest.Inputs.TokenTypeIDs == "" {
+		if inputs, _, infoErr := ort.GetInputOutputInfo(modelPath); infoErr == nil {
+			if _, ok := findTensorInfo(inputs, "token_type_ids"); ok {
+				manifest.Inputs.TokenTypeIDs = "token_type_ids"
+			}
+		}
+	}
 	if err := validateGraph(modelPath, manifest, len(labels)); err != nil {
 		return nil, err
 	}

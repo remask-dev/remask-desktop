@@ -249,29 +249,78 @@ func normalizeEntityType(raw string, custom map[string]string) string {
 		return ""
 	}
 	if value := custom[raw]; value != "" {
-		return strings.ToUpper(value)
+		mapped := strings.ToUpper(value)
+		if canonical := canonicalOpenAIType(mapped); canonical != "" {
+			return canonical
+		}
+		// A downloaded manifest may preserve a model's raw label as its
+		// mapping value (for example TAX_ID -> TAX_ID). Continue through the
+		// alias table instead of treating that as an unknown type.
+		raw = mapped
 	}
+	// Many public NER models namespace labels (for example
+	// `contact.email` or `identity.passport`). Keep the namespace for the
+	// alias lookup, then also try its final component.
+	compact := strings.NewReplacer(".", "_", "/", "_", "-", "_", " ", "_").Replace(raw)
 	defaults := map[string]string{
 		"ACCOUNT_NUMBER": "ACCOUNT_NUMBER", "PRIVATE_ADDRESS": "ADDRESS", "PRIVATE_DATE": "PRIVATE_DATE",
 		"PRIVATE_EMAIL": "EMAIL_ADDRESS", "PRIVATE_PERSON": "PERSON", "PRIVATE_PHONE": "PHONE_NUMBER",
 		"PRIVATE_URL": "URL", "SECRET": "SECRET",
+		"PERSON": "PERSON", "GIVEN_NAME": "PERSON", "SURNAME": "PERSON", "FIRST_NAME": "PERSON", "LAST_NAME": "PERSON", "MIDDLE_NAME": "PERSON", "PATIENT": "PERSON",
 		"PHONENUMBER": "PHONE_NUMBER", "PHONE": "PHONE_NUMBER", "TELEPHONENUMBER": "PHONE_NUMBER", "PHONEIMEI": "DEVICE_ID",
 		"EMAIL": "EMAIL_ADDRESS", "EMAILADDRESS": "EMAIL_ADDRESS",
 		"FIRSTNAME": "PERSON", "MIDDLENAME": "PERSON", "LASTNAME": "PERSON", "PREFIX": "PERSON", "NAME": "PERSON",
 		"COMPANYNAME": "ORGANIZATION", "COMPANY": "ORGANIZATION", "ORGANIZATION": "ORGANIZATION",
-		"STREET": "ADDRESS", "CITY": "ADDRESS", "STATE": "ADDRESS", "COUNTY": "ADDRESS", "BUILDINGNUMBER": "ADDRESS", "ZIPCODE": "ADDRESS", "POSTCODE": "ADDRESS", "ADDRESS": "ADDRESS", "SECONDARYADDRESS": "ADDRESS", "NEARBYGPSCOORDINATE": "LOCATION",
-		"CREDITCARDNUMBER": "BANK_CARD", "CREDITCARD": "BANK_CARD", "CREDITCARDCVV": "BANK_CARD_SECURITY_CODE", "IBAN": "BANK_ACCOUNT", "ACCOUNTNUMBER": "BANK_ACCOUNT", "ACCOUNTNAME": "BANK_ACCOUNT_NAME", "BIC": "BANK_IDENTIFIER", "PIN": "PIN", "PASSWORD": "PASSWORD",
+		"STREET": "ADDRESS", "CITY": "ADDRESS", "STATE": "ADDRESS", "COUNTY": "ADDRESS", "BUILDINGNUMBER": "ADDRESS", "ZIPCODE": "ADDRESS", "ZIP_CODE": "ADDRESS", "POSTCODE": "ADDRESS", "POSTAL_CODE": "ADDRESS", "ADDRESS": "ADDRESS", "SECONDARYADDRESS": "ADDRESS", "SECONDARY_ADDRESS": "ADDRESS", "NEARBYGPSCOORDINATE": "LOCATION",
+		"CREDITCARDNUMBER": "BANK_CARD", "CREDIT_CARD_NUMBER": "BANK_CARD", "CREDITCARD": "BANK_CARD", "CARD_NUMBER": "BANK_CARD", "CREDITCARDCVV": "BANK_CARD_SECURITY_CODE", "CVV": "BANK_CARD_SECURITY_CODE", "CVC": "BANK_CARD_SECURITY_CODE", "CARD_EXPIRY": "BANK_CARD_EXPIRY", "IBAN": "BANK_ACCOUNT", "BANKACCOUNT": "BANK_ACCOUNT", "BANK_ACCOUNT": "ACCOUNT_NUMBER", "ACCOUNTNUMBER": "BANK_ACCOUNT", "ROUTING_NUMBER": "BANK_ACCOUNT", "ACCOUNTNAME": "BANK_ACCOUNT_NAME", "BIC": "BANK_IDENTIFIER", "SWIFT_BIC": "BANK_IDENTIFIER", "PIN": "PIN", "PASSWORD": "PASSWORD", "API_KEY": "SECRET", "PRIVATE_KEY": "SECRET", "JWT": "SECRET", "CONNECTION_STRING": "SECRET", "LOGIN_CREDENTIALS": "SECRET",
 		"IP": "IP_ADDRESS", "IPV4": "IP_ADDRESS", "IPV6": "IP_ADDRESS",
-		"SSN": "NATIONAL_ID", "SOCIALNUM": "NATIONAL_ID", "IDCARD": "NATIONAL_ID", "PASSPORT": "PASSPORT_NUMBER", "USERNAME": "USERNAME",
+		"SSN": "NATIONAL_ID", "SOCIALNUM": "NATIONAL_ID", "SOCIAL_NUM": "NATIONAL_ID", "RRN": "NATIONAL_ID", "FRN": "NATIONAL_ID", "GOVERNMENT_ID": "NATIONAL_ID", "GENERIC_ID": "NATIONAL_ID", "TAX_ID": "NATIONAL_ID", "TAXNUM": "NATIONAL_ID", "IDCARD": "NATIONAL_ID", "IDCARDNUM": "NATIONAL_ID", "PASSPORT": "PASSPORT_NUMBER", "PASSPORT_NUMBER": "PASSPORT_NUMBER", "DRIVER_LICENSE": "DRIVER_LICENSE", "DRIVERS_LICENSE": "DRIVER_LICENSE", "DRIVERLICENSENUM": "DRIVER_LICENSE", "USERNAME": "USERNAME", "USER_ID": "USERNAME",
 		"VEHICLEVIN": "VEHICLE_ID", "VEHICLEVRM": "VEHICLE_ID", "MAC": "MAC_ADDRESS", "USERAGENT": "USER_AGENT",
-		"BITCOINADDRESS": "CRYPTO_ADDRESS", "LITECOINADDRESS": "CRYPTO_ADDRESS", "ETHEREUMADDRESS": "CRYPTO_ADDRESS",
-		"DOB": "DATE_OF_BIRTH", "URL": "URL",
+		"BITCOINADDRESS": "CRYPTO_ADDRESS", "BITCOIN_ADDRESS": "CRYPTO_ADDRESS", "LITECOINADDRESS": "CRYPTO_ADDRESS", "LITECOIN_ADDRESS": "CRYPTO_ADDRESS", "ETHEREUMADDRESS": "CRYPTO_ADDRESS", "ETHEREUM_ADDRESS": "CRYPTO_ADDRESS", "CRYPTO_WALLET": "CRYPTO_ADDRESS",
+		"DOB": "DATE_OF_BIRTH", "DATE_OF_BIRTH": "PRIVATE_DATE", "DATE": "PRIVATE_DATE", "TIME": "PRIVATE_DATE", "URL": "URL", "GPS_COORDINATES": "LOCATION", "IP_ADDRESS": "IP_ADDRESS", "MAC_ADDRESS": "MAC_ADDRESS",
 	}
 	if value := defaults[raw]; value != "" {
-		return value
+		return canonicalOpenAIType(value)
+	}
+	if value := defaults[compact]; value != "" {
+		return canonicalOpenAIType(value)
+	}
+	for alias, value := range defaults {
+		if strings.HasSuffix(compact, "_"+alias) {
+			return canonicalOpenAIType(value)
+		}
+	}
+	if index := strings.LastIndexByte(compact, '_'); index >= 0 {
+		if value := defaults[compact[index+1:]]; value != "" {
+			return canonicalOpenAIType(value)
+		}
+	}
+	for _, part := range strings.Split(compact, "_") {
+		if value := defaults[part]; value != "" {
+			return value
+		}
 	}
 	return ""
 }
+
+func canonicalOpenAIType(value string) string {
+	switch value {
+	case "ACCOUNT_NUMBER", "ADDRESS", "PRIVATE_DATE", "EMAIL_ADDRESS", "PERSON", "PHONE_NUMBER", "URL", "SECRET":
+		return value
+	case "BANK_ACCOUNT", "BANK_CARD", "BANK_CARD_SECURITY_CODE", "BANK_CARD_EXPIRY", "NATIONAL_ID", "PASSPORT_NUMBER", "DRIVER_LICENSE", "VEHICLE_ID", "DEVICE_ID":
+		return "ACCOUNT_NUMBER"
+	case "LOCATION":
+		return "ADDRESS"
+	case "DATE_OF_BIRTH":
+		return "PRIVATE_DATE"
+	default:
+		return ""
+	}
+}
+
+// CanonicalEntityType exposes the same conversion used by the runtime so
+// downloaders and manifest tooling can precompute a stable entity map.
+func CanonicalEntityType(raw string) string { return normalizeEntityType(raw, nil) }
 
 func thresholdFor(normalized, raw string, thresholds map[string]float64) float64 {
 	for _, key := range []string{normalized, raw, "*"} {

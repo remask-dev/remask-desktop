@@ -1,0 +1,18 @@
+[
+  {
+    "id": "openai-privacy-filter-q4f16",
+    "name": "OpenAI Privacy Filter Q4F16",
+    "project_url": "https://huggingface.co/openai/privacy-filter",
+    "repo": "openai/privacy-filter",
+    "revision": "main",
+    "variant": "q4f16"
+  },
+  {
+    "id": "nationaldesignstudio-rampart-q4",
+    "name": "Rampart Q4",
+    "project_url": "https://huggingface.co/nationaldesignstudio/rampart",
+    "repo": "nationaldesignstudio/rampart",
+    "revision": "main",
+    "variant": "q4"
+  }
+]

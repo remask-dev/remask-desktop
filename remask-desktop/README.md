@@ -32,14 +32,11 @@ REMASK_ONNXRUNTIME_LIBRARY=/absolute/path/to/libonnxruntime.dylib npm run stage:
 npm run tauri build
 ```
 
-Set `TARGET_TRIPLE` when cross-compiling. By default the staging script bundles both `openai-privacy-filter-q4` and `ai4privacy-distilbert-q4`, with the OpenAI model active. Override this through comma-separated `REMASK_MODEL_IDS` and `REMASK_ACTIVE_MODEL`. The shell passes `--models-dir` and `--onnxruntime-lib`, then activates the selected bundled model before serving requests.
+Set `TARGET_TRIPLE` when cross-compiling. By default the staging script bundles `openai-privacy-filter-q4`. Override this through `REMASK_MODEL_IDS` and `REMASK_ACTIVE_MODEL`. The shell passes `--models-dir` and `--onnxruntime-lib`, then activates the selected bundled model before serving requests.
 
-Bundling both current Q4 packages adds roughly 1 GB before installer compression. A smaller distribution can stage only AI4Privacy:
+The bundled OpenAI package adds roughly 1 GB before installer compression. Additional models can be downloaded from the Models view after installation.
 
 ```bash
-REMASK_MODEL_IDS=ai4privacy-distilbert-q4 \
-REMASK_ACTIVE_MODEL=ai4privacy-distilbert-q4 \
-REMASK_ONNXRUNTIME_LIBRARY=/absolute/path/to/libonnxruntime.dylib \
 npm run stage:core
 ```
 

@@ -37,6 +37,8 @@ func NewManager(root string, runtime Runtime, detector *pii.DynamicDetector, ope
 	return &Manager{root: root, runtime: runtime, detector: detector, operations: operations, packages: make(map[string]Package)}
 }
 
+func (m *Manager) Root() string { return m.root }
+
 func (m *Manager) Scan(ctx context.Context) ([]Package, error) {
 	if err := os.MkdirAll(m.root, 0o755); err != nil {
 		return nil, err
@@ -223,6 +225,17 @@ func validatePackage(packagePath string) Package {
 	if err := json.Unmarshal(data, &item.Manifest); err != nil {
 		item.Errors = append(item.Errors, "manifest.json: "+err.Error())
 		return item
+	}
+	// Older downloader versions omitted sequence settings. Keep those already
+	// downloaded packages usable while newer downloads write them explicitly.
+	if item.Manifest.MaxTokens == 0 {
+		item.Manifest.MaxTokens = 512
+	}
+	if item.Manifest.Stride == 0 {
+		item.Manifest.Stride = 128
+		if item.Manifest.Tokenizer.Type != "o200k-base" {
+			item.Manifest.Stride = 64
+		}
 	}
 	item.ID = item.Manifest.ID
 	item.Errors = append(item.Errors, validateManifest(item.Manifest)...)

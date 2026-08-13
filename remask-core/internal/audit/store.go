@@ -18,8 +18,9 @@ import (
 const timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 type Settings struct {
-	RecordRequestLogs bool `json:"record_request_logs"`
-	RetentionDays     int  `json:"retention_days"`
+	RecordRequestLogs bool   `json:"record_request_logs"`
+	RetentionDays     int    `json:"retention_days"`
+	HFBaseURL         string `json:"hf_base_url,omitempty"`
 }
 
 func DefaultSettings() Settings {
@@ -29,6 +30,11 @@ func DefaultSettings() Settings {
 func (s Settings) Validate() error {
 	if s.RetentionDays < 1 || s.RetentionDays > 365 {
 		return errors.New("retention_days must be between 1 and 365")
+	}
+	if strings.TrimSpace(s.HFBaseURL) != "" {
+		if !strings.HasPrefix(strings.TrimRight(s.HFBaseURL, "/"), "https://") && !strings.HasPrefix(strings.TrimRight(s.HFBaseURL, "/"), "http://") {
+			return errors.New("hf_base_url must be an http or https URL")
+		}
 	}
 	return nil
 }

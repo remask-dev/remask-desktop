@@ -50,6 +50,20 @@ func TestUnknownModelLabelIsNotRedacted(t *testing.T) {
 	}
 }
 
+func TestCanonicalEntityTypeCoversCommonPIIModelLabels(t *testing.T) {
+	tests := map[string]string{
+		"GIVEN_NAME": "PERSON", "contact.person_name": "PERSON", "EMAIL": "EMAIL_ADDRESS", "contact.email": "EMAIL_ADDRESS",
+		"PHONE": "PHONE_NUMBER", "contact.postal_code": "ADDRESS", "TAX_ID": "ACCOUNT_NUMBER", "DRIVERS_LICENSE": "ACCOUNT_NUMBER",
+		"BANK_ACCOUNT": "ACCOUNT_NUMBER", "CARD_NUMBER": "ACCOUNT_NUMBER", "CVC": "ACCOUNT_NUMBER", "DATE_OF_BIRTH": "PRIVATE_DATE",
+		"credential.api_key": "SECRET", "IP_ADDRESS": "", "GPS_COORDINATES": "ADDRESS", "ORGANIZATION": "",
+	}
+	for raw, want := range tests {
+		if got := CanonicalEntityType(raw); got != want {
+			t.Errorf("CanonicalEntityType(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 func TestViterbiBIOESEnforcesCompleteSpan(t *testing.T) {
 	labels := []string{"O", "B-private_person", "I-private_person", "E-private_person", "S-private_person"}
 	logits := []float32{

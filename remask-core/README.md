@@ -66,8 +66,39 @@ GOCACHE=/tmp/remask-go-cache go test ./...
 
 ```bash
 ./scripts/install-openai-privacy-filter.sh
-./scripts/install-ai4privacy-distilbert.sh
 ```
+
+也可以使用纯 Go 下载器自动从 Hugging Face 下载并生成带 SHA-256 校验的模型包。默认示例是 OpenAI Privacy Filter 的 `q4f16` 变体：
+
+```bash
+go run ./cmd/remask-model-downloader \
+  -repo openai/privacy-filter \
+  -variant q4f16 \
+  -revision main \
+  -output ./models
+```
+
+生成后可显式启用该包：
+
+```bash
+go run ./cmd/remask-core \
+  -models-dir ./models \
+  -active-model openai-privacy-filter-q4f16 \
+  -onnxruntime-lib /absolute/path/to/onnxruntime.dylib
+```
+
+下载器使用的模型地址模板为：
+
+```text
+https://huggingface.co/openai/privacy-filter/resolve/<revision>/onnx/model_q4f16.onnx
+https://huggingface.co/openai/privacy-filter/resolve/<revision>/onnx/model_q4f16.onnx_data
+https://huggingface.co/openai/privacy-filter/resolve/<revision>/tokenizer.json
+https://huggingface.co/openai/privacy-filter/resolve/<revision>/config.json
+https://huggingface.co/openai/privacy-filter/resolve/<revision>/tokenizer_config.json
+https://huggingface.co/openai/privacy-filter/resolve/<revision>/viterbi_calibration.json
+```
+
+网络受限时可指定 Hugging Face 镜像，例如 `-base-url https://hf-mirror.com`，也可设置 `REMASK_HF_BASE_URL`。下载器会先读取仓库 API 的文件列表，只下载实际存在的 ONNX、tokenizer 和配置文件；外部数据文件（`.onnx_data`）以及 calibration 文件都是可选的，不会再因为仓库没有它们而报 404。下载器支持 `.part` 断点续传；私有仓库通过 `HF_TOKEN` 或 `-token` 传入访问令牌。
 
 目录示例：
 
@@ -78,10 +109,6 @@ models/
 │   ├── model_q4.onnx
 │   ├── model_q4.onnx_data
 │   └── tokenizer.json
-└── ai4privacy-distilbert-q4/
-    ├── manifest.json
-    ├── model_q4.onnx
-    └── vocab.txt
 ```
 
 从仓库目录执行 `go run ./cmd/remask-core` 时，如果存在默认模型，Core 会激活 `openai-privacy-filter-q4`，并自动查找相邻桌面项目资源目录中的 ONNX Runtime 动态库。也可以显式指定：
@@ -95,4 +122,4 @@ Linux 使用 `libonnxruntime.so`，Windows 使用 `onnxruntime.dll`。原生库�
 
 不需要 ONNX 模型的精简服务端构建可使用 `-tags noonnxruntime`。
 
-`openai-privacy-filter-q4` 使用约 907 MB 的 Q4 ONNX external-data 包、`o200k_base` tokenizer 与受约束 BIOES Viterbi 解码。`ai4privacy-distilbert-q4` 约 117 MB，适合对安装体积和内存更敏感的部署。两个模型均可通过模型管理 API 热切换。
+`openai-privacy-filter-q4` 使用约 907 MB 的 Q4 ONNX external-data 包、`o200k_base` tokenizer 与受约束 BIOES Viterbi 解码。模型可通过桌面端模型列表下载，也可调用 `POST /api/v1/models/download` 手动指定 Hugging Face 项目地址。Hugging Face 镜像在桌面端设置中配置，或通过下载请求的 `base_url` 指定。
