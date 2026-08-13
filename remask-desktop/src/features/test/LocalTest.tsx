@@ -8,7 +8,7 @@ import { useI18n } from "../../shared/i18n/I18n";
 import { Button } from "../../shared/ui/Button";
 import { Textarea } from "../../shared/ui/Textarea";
 
-const SAMPLE = "客户张明的手机号是 13800138000，邮箱是 zhangming@example.com，住址为上海市静安区南京西路 100 号。";
+const SAMPLE = "Olivia Bennett, born April 18, 1987, lives at 742 Evergreen Terrace, Springfield, IL 62704. Contact her at +1 (202) 555-0147 or olivia.bennett@example.com. Account: 4839201756; last login IP: 203.0.113.42.";
 
 export function LocalTest() {
   const { t } = useI18n();
