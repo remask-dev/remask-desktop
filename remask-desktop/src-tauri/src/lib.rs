@@ -103,10 +103,9 @@ fn find_runtime_library(resource_dir: &Path) -> Option<PathBuf> {
 #[tauri::command]
 fn stop_core(state: State<'_, CoreProcess>) -> Result<(), String> {
     let mut process = state.0.lock().map_err(|_| "core process lock poisoned")?;
-    if let Some(child) = process.as_mut() {
+    if let Some(child) = process.take() {
         child.kill().map_err(|error| error.to_string())?;
     }
-    *process = None;
     Ok(())
 }
 

@@ -36,6 +36,24 @@ Core 使用 `machineid.ProtectedID("remask")` 获取应用隔离的设备标识�
 go test ./...
 ```
 
+针对已运行网关的 DeepSeek 黑盒自动化测试：
+
+```bash
+python3 ./scripts/test-deepseek-gateway.py
+```
+
+脚本默认测试 `http://127.0.0.1:17681`、管理端 `http://127.0.0.1:17680` 和
+`deepseek-v4-flash`，覆盖用户内容脱敏、AI 回答敏感内容不脱敏、多轮对话及缓存未命中。
+测试会读取安全审计日志验证实际发往上游的文本，因此需要启用请求日志、EMAIL 规则，并保持
+`redact_ai_answers=false`。使用客户端透传凭证时通过环境变量传入：
+
+```bash
+REMASK_TEST_API_KEY=your-key python3 ./scripts/test-deepseek-gateway.py
+```
+
+地址、模型和 User-Agent 可通过 `--gateway-url`、`--management-url`、`--model`、
+`--user-agent` 覆盖；默认 User-Agent 为 `remask-deepseek-gateway-e2e/1.0`。脚本不会修改或清空现有配置与日志。
+
 若当前环境限制默认 Go build cache，可设置：
 
 ```bash

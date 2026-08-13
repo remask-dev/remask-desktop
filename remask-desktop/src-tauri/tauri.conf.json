@@ -13,9 +13,10 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Remask",
-        "width": 1240,
-        "height": 800,
+        "width": 1040,
+        "height": 650,
         "minWidth": 640,
         "minHeight": 560,
         "resizable": true

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -180,7 +181,8 @@ func transformAt(node *any, segments []string, transform func(string) (string, e
 	switch current := (*node).(type) {
 	case map[string]any:
 		if head == "*" {
-			for key, child := range current {
+			for _, key := range sortedKeys(current) {
+				child := current[key]
 				value := child
 				if err := transformAt(&value, tail, transform); err != nil {
 					return err
@@ -239,7 +241,8 @@ func transformAtPath(node *any, segments, currentPath []string, transform func(T
 	switch current := (*node).(type) {
 	case map[string]any:
 		if head == "*" {
-			for key, child := range current {
+			for _, key := range sortedKeys(current) {
+				child := current[key]
 				value := child
 				if err := transformAtPath(&value, tail, appendPath(currentPath, escapePathSegment(key)), transform); err != nil {
 					return err
@@ -293,7 +296,8 @@ func visitAtPath(node *any, segments, currentPath []string, visit func(TextMatch
 	switch current := (*node).(type) {
 	case map[string]any:
 		if head == "*" {
-			for key, child := range current {
+			for _, key := range sortedKeys(current) {
+				child := current[key]
 				value := child
 				if err := visitAtPath(&value, tail, appendPath(currentPath, escapePathSegment(key)), visit); err != nil {
 					return err
@@ -346,7 +350,8 @@ func visitScalarAtPath(node *any, segments, currentPath []string, visit func(Sca
 	switch current := (*node).(type) {
 	case map[string]any:
 		if head == "*" {
-			for key, child := range current {
+			for _, key := range sortedKeys(current) {
+				child := current[key]
 				value := child
 				if err := visitScalarAtPath(&value, tail, appendPath(currentPath, escapePathSegment(key)), visit); err != nil {
 					return err
@@ -383,6 +388,15 @@ func appendPath(path []string, segment string) []string {
 	result := make([]string, len(path), len(path)+1)
 	copy(result, path)
 	return append(result, segment)
+}
+
+func sortedKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func escapePathSegment(value string) string {

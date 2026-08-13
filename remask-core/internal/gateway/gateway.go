@@ -543,7 +543,7 @@ func usageFromValue(value any) audit.TokenUsage {
 		switch typed := current.(type) {
 		case map[string]any:
 			for key, child := range typed {
-				if key == "cached_tokens" || key == "cache_read_input_tokens" || key == "cachedContentTokenCount" {
+				if key == "cached_tokens" || key == "cache_read_input_tokens" || key == "cachedContentTokenCount" || key == "prompt_cache_hit_tokens" {
 					if number, ok := child.(float64); ok && int(number) > result.Cached {
 						result.Cached = int(number)
 					}

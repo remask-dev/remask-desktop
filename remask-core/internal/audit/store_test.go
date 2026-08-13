@@ -93,6 +93,39 @@ func TestStorePersistsCompleteAuditFieldContent(t *testing.T) {
 	}
 }
 
+func TestStoreReturnsFieldsInStablePathOrder(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(Entry{
+		UpstreamID: "test",
+		Fields:     []Field{{Path: "/placeholder"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a row written by an older Core version, before field ordering was
+	// normalized on write.
+	if _, err := store.db.Exec(`UPDATE audit_entries SET fields_json = ?`, `[
+		{"path":"/messages/10/content"},
+		{"path":"/messages/2/content"},
+		{"path":"/messages/1/content"}
+	]`); err != nil {
+		t.Fatal(err)
+	}
+
+	logs := store.List(Query{Limit: 1})
+	if len(logs) != 1 {
+		t.Fatalf("logs = %#v", logs)
+	}
+	want := []string{"/messages/1/content", "/messages/2/content", "/messages/10/content"}
+	for index, path := range want {
+		if logs[0].Fields[index].Path != path {
+			t.Fatalf("field %d path = %q, want %q", index, logs[0].Fields[index].Path, path)
+		}
+	}
+}
+
 func TestStatsHandlesFractionalAverageLatency(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

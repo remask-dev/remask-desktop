@@ -241,6 +241,7 @@ func (s *Store) Add(entry Entry) error {
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
 	}
+	sortFields(entry.Fields)
 	fields, err := json.Marshal(entry.Fields)
 	if err != nil {
 		return err
@@ -320,6 +321,7 @@ func (s *Store) List(query Query) []Entry {
 		}
 		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 		_ = json.Unmarshal([]byte(fields), &entry.Fields)
+		sortFields(entry.Fields)
 		result = append(result, entry)
 	}
 	return result

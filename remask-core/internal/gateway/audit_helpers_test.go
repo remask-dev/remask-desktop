@@ -16,10 +16,14 @@ func TestExtractTokenUsageAcrossProviders(t *testing.T) {
 		"openai":    `{"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20,"prompt_tokens_details":{"cached_tokens":6}}}`,
 		"anthropic": `{"message":{"usage":{"input_tokens":7,"output_tokens":5}}}`,
 		"gemini":    `{"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13}}`,
+		"deepseek":  `{"usage":{"prompt_tokens":15,"completion_tokens":3,"total_tokens":18,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":10}}`,
 	} {
 		usage := extractTokenUsage([]byte(body))
 		if usage.Total == 0 {
 			t.Fatalf("%s usage not extracted: %#v", name, usage)
+		}
+		if name == "deepseek" && usage.Cached != 5 {
+			t.Fatalf("DeepSeek cached usage not extracted: %#v", usage)
 		}
 	}
 	openAI := extractTokenUsage([]byte(`{"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":6}}}`))

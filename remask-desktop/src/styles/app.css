@@ -32,10 +32,12 @@
 }
 
 @layer base {
-  * { @apply border-border; }
+  * { @apply border-border; user-select: none; -webkit-user-select: none; }
   html, body, #root { @apply size-full overflow-hidden; }
   body { @apply bg-background text-foreground antialiased; }
   button, input, select, textarea { font: inherit; }
+  input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
+  .logs-view .audit-field pre, .logs-view .audit-field pre * { user-select: text; -webkit-user-select: text; }
   button { cursor: pointer; }
   button:disabled { cursor: default; }
   code, pre { font-family: "SFMono-Regular", Consolas, monospace; }
