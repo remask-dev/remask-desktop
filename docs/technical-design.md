@@ -1,12 +1,9 @@
 # Remask 技术方案
 
 ## 1. 文档状态
-
 - 状态：首版实现中
-- 首版传输范围：HTTP/HTTPS、JSON、SSE
 - 核心项目：`remask-core`
 - 桌面项目：`remask-desktop`
-- 标签格式：`<PHONE_NUMBER:A7F2>`
 
 ## 2. 背景与目标
 
