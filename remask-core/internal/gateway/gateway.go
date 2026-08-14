@@ -24,6 +24,8 @@ import (
 
 const maxBodyBytes = 8 << 20
 
+var errBodyTooLarge = errors.New("body exceeds configured limit")
+
 type Gateway struct {
 	logger     *log.Logger
 	upstreams  *upstream.Registry
@@ -37,7 +39,11 @@ type Gateway struct {
 
 func New(logger *log.Logger, upstreams *upstream.Registry, profiles *profile.Registry, service *pii.Service, audits *audit.Store, httpClient *http.Client, configuredRules ...*pii.RuleDetector) *Gateway {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		// The gateway is itself commonly launched with HTTPS_PROXY pointing at
+		// Remask. Its upstream transport must never recurse through that proxy.
+		transport.Proxy = nil
+		httpClient = &http.Client{Transport: transport, Timeout: 5 * time.Minute, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		}}
 	}
@@ -55,14 +61,25 @@ func New(logger *log.Logger, upstreams *upstream.Registry, profiles *profile.Reg
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	redactionDuration := int64(0)
-	counted := &countingResponseWriter{ResponseWriter: w}
-	w = counted
 	configured, upstreamPath, operation, matched, routeErr := g.resolveRoute(r.Method, r.URL.Path)
 	if routeErr != nil {
 		writeProxyError(w, routeErr.status, routeErr.code, routeErr.message)
 		return
 	}
+	g.serveResolved(w, r, configured, upstreamPath, operation, matched)
+}
+
+// ServeUpstreamHTTP processes a request whose destination has already been
+// resolved by the explicit forward proxy. Unmatched operations retain the
+// gateway's transparent passthrough behavior.
+func (g *Gateway) ServeUpstreamHTTP(w http.ResponseWriter, r *http.Request, configured upstream.Upstream) {
+	g.serveResolved(w, r, configured, r.URL.Path, profile.Operation{}, false)
+}
+
+func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured upstream.Upstream, upstreamPath string, operation profile.Operation, matched bool) {
+	redactionDuration := int64(0)
+	counted := &countingResponseWriter{ResponseWriter: w}
+	w = counted
 	operationErr := profile.ErrNoMatch
 	if matched {
 		operationErr = nil
@@ -98,10 +115,29 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := readBody(r.Body, maxBodyBytes)
 	if err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			passthrough = true
+			auditEntry.ProtectionMode = "passthrough"
+			if r.ContentLength > 0 {
+				auditEntry.RequestBytes = r.ContentLength
+			} else {
+				auditEntry.RequestBytes = int64(len(body))
+			}
+			g.serveOversizedPassthrough(w, r, configured, upstreamPath, io.MultiReader(bytes.NewReader(body), r.Body), &auditEntry)
+			return
+		}
 		writeProxyError(w, http.StatusRequestEntityTooLarge, "REQUEST_BODY_INVALID", err.Error())
 		return
 	}
 	auditEntry.RequestBytes = int64(len(body))
+	contentEncoding := strings.TrimSpace(strings.ToLower(r.Header.Get("Content-Encoding")))
+	if !passthrough && (len(body) == 0 || !isJSON(r.Header.Get("Content-Type")) || !json.Valid(body) || (contentEncoding != "" && contentEncoding != "identity")) {
+		// A matched route with a representation we do not understand must remain
+		// available, but must never be reported as protected.
+		passthrough = true
+		protectionMode = "passthrough"
+		auditEntry.ProtectionMode = protectionMode
+	}
 
 	redactedBody := body
 	scopeID := ""
@@ -133,13 +169,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	copyRequestHeaders(request.Header, r.Header)
-	if configured.APIKey != "" {
-		if configuredProfile, ok := g.profiles.Get(configured.ProfileID); ok {
-			for key, template := range configuredProfile.HeaderTemplates {
-				request.Header.Set(key, strings.ReplaceAll(template, "{{api_key}}", configured.APIKey))
-			}
-		}
-	}
+	g.applyManagedHeaders(request, configured)
 	request.Header.Del("X-Remask-Policy")
 	request.Header.Del("X-Remask-Scope")
 	request.Header.Del("X-Remask-Request-ID")
@@ -155,6 +185,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer response.Body.Close()
+	responseEncoding := strings.TrimSpace(strings.ToLower(response.Header.Get("Content-Encoding")))
+	if responseEncoding != "" && responseEncoding != "identity" {
+		auditEntry.Streaming = strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
+		g.servePassthrough(w, response, auditEntry.Streaming, &auditEntry.TokenUsage)
+		return
+	}
 	if passthrough {
 		auditEntry.Streaming = strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 		g.servePassthrough(w, response, auditEntry.Streaming, &auditEntry.TokenUsage)
@@ -169,6 +205,14 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	responseBody, err := readBody(response.Body, maxBodyBytes)
 	if err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			copyResponseHeaders(w.Header(), response.Header)
+			w.Header().Del("ETag")
+			w.WriteHeader(response.StatusCode)
+			_, _ = w.Write(responseBody)
+			_, _ = io.Copy(w, response.Body)
+			return
+		}
 		writeProxyError(w, http.StatusBadGateway, "UPSTREAM_RESPONSE_INVALID", err.Error())
 		return
 	}
@@ -186,6 +230,52 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Del("ETag")
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(responseBody)
+}
+
+func (g *Gateway) serveOversizedPassthrough(w http.ResponseWriter, r *http.Request, configured upstream.Upstream, upstreamPath string, body io.Reader, auditEntry *audit.Entry) {
+	target, err := buildTarget(configured.BaseURL, upstreamPath, r.URL.RawQuery)
+	if err != nil {
+		auditEntry.ErrorCode = "UPSTREAM_URL_INVALID"
+		writeProxyError(w, http.StatusInternalServerError, "UPSTREAM_URL_INVALID", err.Error())
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), body)
+	if err != nil {
+		auditEntry.ErrorCode = "UPSTREAM_REQUEST_FAILED"
+		writeProxyError(w, http.StatusInternalServerError, "UPSTREAM_REQUEST_FAILED", err.Error())
+		return
+	}
+	request.ContentLength = r.ContentLength
+	copyRequestHeaders(request.Header, r.Header)
+	g.applyManagedHeaders(request, configured)
+	request.Header.Del("X-Remask-Policy")
+	request.Header.Del("X-Remask-Scope")
+	request.Header.Del("X-Remask-Request-ID")
+
+	response, err := g.httpClient.Do(request)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		auditEntry.ErrorCode = "UPSTREAM_UNAVAILABLE"
+		writeProxyError(w, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", err.Error())
+		return
+	}
+	defer response.Body.Close()
+	streaming := strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
+	auditEntry.Streaming = streaming
+	g.servePassthrough(w, response, streaming, &auditEntry.TokenUsage)
+}
+
+func (g *Gateway) applyManagedHeaders(request *http.Request, configured upstream.Upstream) {
+	if configured.APIKey == "" {
+		return
+	}
+	if configuredProfile, ok := g.profiles.Get(configured.ProfileID); ok {
+		for key, template := range configuredProfile.HeaderTemplates {
+			request.Header.Set(key, strings.ReplaceAll(template, "{{api_key}}", configured.APIKey))
+		}
+	}
 }
 
 type routeError struct {
@@ -669,7 +759,7 @@ func readBody(reader io.Reader, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(body)) > limit {
-		return nil, errors.New("body exceeds configured limit")
+		return body, errBodyTooLarge
 	}
 	return body, nil
 }

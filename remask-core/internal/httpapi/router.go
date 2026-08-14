@@ -13,6 +13,7 @@ import (
 
 	"github.com/remask/remask-core/internal/audit"
 	"github.com/remask/remask-core/internal/gateway"
+	"github.com/remask/remask-core/internal/mitm"
 	"github.com/remask/remask-core/internal/model"
 	"github.com/remask/remask-core/internal/modeldownload"
 	"github.com/remask/remask-core/internal/operation"
@@ -33,16 +34,17 @@ type Router struct {
 	operations *operation.Store
 	audits     *audit.Store
 	rules      *pii.RuleDetector
+	authority  *mitm.Authority
 	startedAt  time.Time
 }
 
-func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Registry, upstreams *upstream.Registry, models *model.Manager, operations *operation.Store, audits *audit.Store, configuredRules ...*pii.RuleDetector) http.Handler {
+func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Registry, upstreams *upstream.Registry, models *model.Manager, operations *operation.Store, audits *audit.Store, authority *mitm.Authority, configuredRules ...*pii.RuleDetector) http.Handler {
 	rules := pii.NewRuleDetector()
 	if len(configuredRules) > 0 && configuredRules[0] != nil {
 		rules = configuredRules[0]
 	}
 	router := &Router{
-		logger: logger, pii: service, profiles: profiles, upstreams: upstreams, models: models, operations: operations, audits: audits, rules: rules,
+		logger: logger, pii: service, profiles: profiles, upstreams: upstreams, models: models, operations: operations, audits: audits, rules: rules, authority: authority,
 		startedAt: time.Now().UTC(),
 	}
 	mux := http.NewServeMux()
@@ -55,6 +57,7 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 	mux.HandleFunc("GET /api/v1/scopes/{scope_id}", router.getScope)
 	mux.HandleFunc("DELETE /api/v1/scopes/{scope_id}", router.deleteScope)
 	mux.HandleFunc("GET /api/v1/profiles", router.listProfiles)
+	mux.HandleFunc("GET /api/v1/proxy/ca", router.proxyCAStatus)
 	mux.HandleFunc("GET /api/v1/upstreams", router.listUpstreams)
 	mux.HandleFunc("POST /api/v1/upstreams", router.putUpstream)
 	mux.HandleFunc("GET /api/v1/upstreams/{upstream_id}", router.getUpstream)
@@ -114,10 +117,18 @@ func (r *Router) ready(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 }
 
+func (r *Router) proxyCAStatus(w http.ResponseWriter, _ *http.Request) {
+	if r.authority == nil {
+		writeError(w, http.StatusServiceUnavailable, "PROXY_CA_UNAVAILABLE", "local proxy certificate authority is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, r.authority.Status())
+}
+
 func (r *Router) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": "remask-core", "version": "0.1.0-dev", "api_version": "v1",
-		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
+		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.selective-mitm", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
 		"model_runtime": r.models.RuntimeStatus(),
 	})
 }

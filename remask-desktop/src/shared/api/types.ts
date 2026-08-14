@@ -1,5 +1,6 @@
 export interface RuntimeStatus { available: boolean; name: string; provider?: string; configured_provider?: string; provider_config_pending?: boolean; max_inference_tokens?: number; configured_max_inference_tokens?: number; inference_config_pending?: boolean }
 export interface VersionResponse { name: string; version: string; api_version: string; capabilities: string[]; model_runtime: RuntimeStatus }
+export interface ProxyCAStatus { ready: boolean; certificate_path?: string; fingerprint_sha256: string }
 export interface Profile { id: string; name: string; operations: unknown[]; header_templates?: Record<string, string> }
 export interface Upstream { id: string; base_url: string; profile_id: string; credential_mode: "passthrough" | "managed"; api_key?: string; header_templates?: Record<string, string> }
 export interface ModelManifest { name: string; version: string; quantization: string; max_tokens: number; stride: number; label_scheme: string; entity_types?: Record<string, string> }
@@ -21,4 +22,4 @@ export interface RuleConfig { id: string; pattern: string; enabled: boolean }
 export interface EntityTypeConfig { type: string; enabled: boolean }
 export interface PolicySettings { enabled: boolean; redact_ai_answers: boolean; entity_types: EntityTypeConfig[]; rules: RuleConfig[] }
 export interface Operation { id: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; progress?: number; message?: string; error?: string }
-export interface BootstrapData { version: VersionResponse; profiles: Profile[]; upstreams: Upstream[]; models: ModelPackage[]; runtime: RuntimeStatus; activeModel: ActiveModel | null; settings: AuditSettings; policy: PolicySettings; stats: AuditStats; logs: AuditLog[] }
+export interface BootstrapData { version: VersionResponse; proxyCA: ProxyCAStatus; profiles: Profile[]; upstreams: Upstream[]; models: ModelPackage[]; runtime: RuntimeStatus; activeModel: ActiveModel | null; settings: AuditSettings; policy: PolicySettings; stats: AuditStats; logs: AuditLog[] }

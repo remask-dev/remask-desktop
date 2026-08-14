@@ -46,6 +46,15 @@ func TestRedactAndRestoreAPI(t *testing.T) {
 	}
 }
 
+func TestProxyCAStatusAPI(t *testing.T) {
+	handler := testHandler(t)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/proxy/ca", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ready":true`) || !strings.Contains(response.Body.String(), `"fingerprint_sha256"`) {
+		t.Fatalf("proxy CA status: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 	var upstreamBody []byte
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -303,6 +312,64 @@ func TestUnmatchedPathIsForwardedWithoutTransformation(t *testing.T) {
 	handler.ServeHTTP(logs, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs?limit=1", nil))
 	if strings.Contains(logs.Body.String(), "13800138000") || !strings.Contains(logs.Body.String(), `"protection_mode":"passthrough"`) || !strings.Contains(logs.Body.String(), `"operation_id":"passthrough"`) {
 		t.Fatalf("unexpected passthrough audit log: %s", logs.Body.String())
+	}
+}
+
+func TestMatchedInvalidJSONIsForwardedWithoutBlocking(t *testing.T) {
+	const requestBody = `{"messages":[broken`
+	var received string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		received = string(body)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Request: r}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || received != requestBody {
+		t.Fatalf("invalid JSON was blocked or changed: status=%d received=%q body=%s", response.Code, received, response.Body.String())
+	}
+}
+
+func TestOversizedMatchedBodyIsStreamedAsPassthrough(t *testing.T) {
+	requestBody := `{"messages":[{"role":"user","content":"` + strings.Repeat("x", 9<<20) + `foo@example.com"}]}`
+	var receivedBytes int
+	var receivedTail string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBytes = len(body)
+		if len(body) > 32 {
+			receivedTail = string(body[len(body)-32:])
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Request: r}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || receivedBytes != len(requestBody) || !strings.Contains(receivedTail, "foo@example.com") {
+		t.Fatalf("oversized body was blocked or truncated: status=%d bytes=%d/%d tail=%q", response.Code, receivedBytes, len(requestBody), receivedTail)
+	}
+}
+
+func TestOversizedProtectedResponseIsStreamedWithoutBlocking(t *testing.T) {
+	responseBody := `{"payload":"` + strings.Repeat("y", 9<<20) + `"}`
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(responseBody)), Request: r}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"foo@example.com"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.Len() != len(responseBody) {
+		t.Fatalf("oversized response was blocked or truncated: status=%d bytes=%d/%d", response.Code, response.Body.Len(), len(responseBody))
 	}
 }
 

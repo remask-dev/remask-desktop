@@ -21,6 +21,7 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:17680", "HTTP listen address")
 	proxyAddr := flag.String("proxy-addr", "127.0.0.1:17681", "AI proxy listen address")
+	forwardProxyAddr := flag.String("forward-proxy-addr", "127.0.0.1:17682", "explicit HTTP/HTTPS proxy listen address")
 	modelsDir := flag.String("models-dir", "models", "managed model directory")
 	activeModel := flag.String("active-model", os.Getenv("REMASK_ACTIVE_MODEL"), "model ID to load before serving requests")
 	onnxRuntimeLibrary := flag.String("onnxruntime-lib", "", "path to the ONNX Runtime shared library")
@@ -30,8 +31,8 @@ func main() {
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "remask-core ", log.LstdFlags|log.LUTC)
-	if *addr == *proxyAddr {
-		logger.Printf("management and proxy addresses must be different")
+	if *addr == *proxyAddr || *addr == *forwardProxyAddr || *proxyAddr == *forwardProxyAddr {
+		logger.Printf("management, gateway, and forward proxy addresses must be different")
 		os.Exit(1)
 	}
 	if *dataDir == "" {
@@ -75,6 +76,12 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
+	forwardProxyServer := &http.Server{
+		Addr:              *forwardProxyAddr,
+		Handler:           application.ForwardProxyHandler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       90 * time.Second,
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -89,12 +96,16 @@ func main() {
 		if err := proxyServer.Shutdown(shutdownCtx); err != nil {
 			logger.Printf("shutdown proxy server: %v", err)
 		}
+		if err := forwardProxyServer.Shutdown(shutdownCtx); err != nil {
+			logger.Printf("shutdown forward proxy server: %v", err)
+		}
 	}()
 
-	serverErrors := make(chan error, 2)
+	serverErrors := make(chan error, 3)
 	go func() { serverErrors <- server.ListenAndServe() }()
 	go func() { serverErrors <- proxyServer.ListenAndServe() }()
-	logger.Printf("ready address=%s proxy_address=%s", *addr, *proxyAddr)
+	go func() { serverErrors <- forwardProxyServer.ListenAndServe() }()
+	logger.Printf("ready address=%s proxy_address=%s forward_proxy_address=%s ca_certificate=%s", *addr, *proxyAddr, *forwardProxyAddr, application.ProxyAuthorityStatus().CertificatePath)
 	if err := <-serverErrors; err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

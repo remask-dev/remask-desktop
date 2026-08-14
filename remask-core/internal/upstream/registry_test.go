@@ -6,15 +6,21 @@ import (
 	"testing"
 )
 
-func TestRegistrySeedsOpenAIOnFirstInitialization(t *testing.T) {
+func TestRegistrySeedsBuiltinAIUpstreamsOnFirstInitialization(t *testing.T) {
 	directory := t.TempDir()
 	registry, err := NewRegistry(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	items := registry.List()
-	if len(items) != 1 || items[0] != DefaultUpstreams()[0] {
+	expected := DefaultUpstreams()
+	if len(items) != len(expected) {
 		t.Fatalf("unexpected preset upstreams: %#v", items)
+	}
+	for index := range expected {
+		if items[index] != expected[index] {
+			t.Fatalf("preset upstream %d = %#v, expected %#v", index, items[index], expected[index])
+		}
 	}
 	if _, err := os.Stat(filepath.Join(directory, "upstreams.json")); err != nil {
 		t.Fatalf("preset upstream was not persisted: %v", err)
@@ -32,6 +38,21 @@ func TestRegistryDoesNotReplaceExistingConfiguration(t *testing.T) {
 	}
 	if items := registry.List(); len(items) != 0 {
 		t.Fatalf("existing configuration was replaced: %#v", items)
+	}
+}
+
+func TestRegistryMigratesLegacyOpenAIDefault(t *testing.T) {
+	directory := t.TempDir()
+	legacy := `[{"id":"openai","base_url":"https://api.openai.com","profile_id":"openai","credential_mode":"passthrough"}]`
+	if err := os.WriteFile(filepath.Join(directory, "upstreams.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewRegistry(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := registry.List(); len(items) != len(DefaultUpstreams()) {
+		t.Fatalf("legacy defaults were not migrated: %#v", items)
 	}
 }
 
@@ -77,5 +98,22 @@ func TestRegistryRemovesManagedHeadersWhenSwitchingToPassthrough(t *testing.T) {
 	}
 	if stored.APIKey != "" {
 		t.Fatalf("passthrough upstream retained managed API key: %#v", stored.APIKey)
+	}
+}
+
+func TestRegistryMatchesProxyAuthorityIncludingConfiguredPort(t *testing.T) {
+	registry, err := NewRegistry("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := Upstream{ID: "local", BaseURL: "https://127.0.0.1:9443", ProfileID: "openai", CredentialMode: "passthrough"}
+	if err := registry.Put(item); err != nil {
+		t.Fatal(err)
+	}
+	if matched, ok := registry.FindByAuthority("127.0.0.1:9443"); !ok || matched.ID != item.ID {
+		t.Fatalf("configured authority did not match: %#v, %t", matched, ok)
+	}
+	if _, ok := registry.FindByAuthority("127.0.0.1:443"); ok {
+		t.Fatal("different authority port unexpectedly matched")
 	}
 }

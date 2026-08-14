@@ -11,6 +11,15 @@ func TestOpenAIProfileMatchesChatCompletionsAndResponses(t *testing.T) {
 	}
 }
 
+func TestCodexChatGPTProfileMatchesKnownResponsesPaths(t *testing.T) {
+	registry := NewRegistry(Builtins()...)
+	for _, requestPath := range []string{"/backend-api/codex/responses", "/backend-api/api/codex", "/backend-api/api/codex/responses/compact"} {
+		if _, err := registry.Match("codex-chatgpt", "POST", requestPath); err != nil {
+			t.Fatalf("Codex ChatGPT profile did not match %s: %v", requestPath, err)
+		}
+	}
+}
+
 func TestBuiltinProfilesMatchModelListAsPassthrough(t *testing.T) {
 	registry := NewRegistry(Builtins()...)
 	requests := []struct {

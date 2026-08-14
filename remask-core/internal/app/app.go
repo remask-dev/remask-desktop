@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/remask/remask-core/internal/audit"
+	"github.com/remask/remask-core/internal/forwardproxy"
 	"github.com/remask/remask-core/internal/gateway"
 	"github.com/remask/remask-core/internal/httpapi"
+	"github.com/remask/remask-core/internal/mitm"
 	"github.com/remask/remask-core/internal/model"
 	"github.com/remask/remask-core/internal/operation"
 	"github.com/remask/remask-core/internal/pii"
@@ -21,8 +23,10 @@ import (
 )
 
 type App struct {
-	handler      http.Handler
-	proxyHandler http.Handler
+	handler             http.Handler
+	proxyHandler        http.Handler
+	forwardProxyHandler http.Handler
+	proxyAuthority      *mitm.Authority
 }
 
 func New(logger *log.Logger) (*App, error) {
@@ -115,10 +119,18 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize upstream registry: %w", err)
 	}
+	authority, err := mitm.NewAuthority(options.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("initialize local proxy certificate authority: %w", err)
+	}
 	proxy := gateway.New(logger, upstreams, profiles, service, audits, options.HTTPClient, rules)
+	forward := forwardproxy.New(logger, upstreams, proxy, authority)
 
-	handler := httpapi.NewRouter(logger, service, profiles, upstreams, models, operations, audits, rules)
-	return &App{handler: handler, proxyHandler: httpapi.NewProxyRouter(logger, proxy)}, nil
+	handler := httpapi.NewRouter(logger, service, profiles, upstreams, models, operations, audits, authority, rules)
+	return &App{
+		handler: handler, proxyHandler: httpapi.NewProxyRouter(logger, proxy),
+		forwardProxyHandler: forward, proxyAuthority: authority,
+	}, nil
 }
 
 func (a *App) Handler() http.Handler {
@@ -128,3 +140,9 @@ func (a *App) Handler() http.Handler {
 func (a *App) ProxyHandler() http.Handler {
 	return a.proxyHandler
 }
+
+func (a *App) ForwardProxyHandler() http.Handler { return a.forwardProxyHandler }
+
+func (a *App) ProxyAuthorityStatus() mitm.Status { return a.proxyAuthority.Status() }
+
+func (a *App) RootCertificatePEM() []byte { return a.proxyAuthority.RootCertificatePEM() }

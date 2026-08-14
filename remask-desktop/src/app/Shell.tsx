@@ -35,7 +35,7 @@ export function Shell() {
     }
     try {
       await invoke("stop_core");
-      await invoke("start_core", { address: new URL(connection.core()).host, proxyAddress: new URL(connection.proxy()).host });
+      await invoke("start_core", { address: new URL(connection.core()).host, proxyAddress: new URL(connection.proxy()).host, forwardProxyAddress: new URL(connection.forwardProxy()).host });
       window.setTimeout(() => queryClient.invalidateQueries(), 600);
     } catch (error) { notify(String(error)); }
   }

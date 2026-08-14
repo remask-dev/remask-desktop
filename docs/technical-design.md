@@ -26,6 +26,7 @@ Remask 在 AI 客户端和上游 AI API 之间提供本地 PII 保护：请求�
 首版支持：
 
 - HTTP/HTTPS 反向代理。
+- 标准 HTTP 正向代理和 HTTPS `CONNECT`；仅对已配置 AI 域名使用本地 CA 解密。
 - `application/json` 请求和非流式响应。
 - `text/event-stream` SSE 响应。
 - OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Gemini GenerateContent 等内置 Profile。
@@ -43,15 +44,18 @@ Remask 在 AI 客户端和上游 AI API 之间提供本地 PII 保护：请求�
 
 后续支持 NDJSON 时只新增传输编解码器，不修改 PII Pipeline。
 
+上述未支持协议在正向代理模式下透明转发，不执行脱敏；“不支持处理”不等于“阻断连接”。审计和界面不得把透明转发请求标记为已保护。
+
 ## 4. 总体架构
 
 ```text
 AI Client / remask-desktop
           |
-          | HTTP JSON / SSE
+          | base_url gateway or HTTP_PROXY / HTTPS_PROXY
           v
 +------------------------- remask-core --------------------------+
 | Authentication -> Router -> Upstream/Profile Matcher           |
+| CONNECT Tunnel -> Selective TLS MITM -> Host Matcher            |
 |                              |                                 |
 |                       Document Transformer                     |
 |                              |                                 |
@@ -1032,6 +1036,8 @@ type ModelManager interface {
 - 管理 Profile、Policy、Upstream 和模型。
 - 提供独立脱敏测试台。
 - 展示代理地址、运行状态、模型进度和不含 PII 的诊断信息。
+- 将本地 CA 安装到当前用户的系统信任库，并展示证书指纹和安装状态。
+- 通过白名单启动器为 Claude Code、Codex 等客户端注入进程级代理与 CA 环境。
 - 通过系统安全存储管理上游凭据引用。
 
 桌面端不承担：
@@ -1050,7 +1056,7 @@ type ModelManager interface {
 5. 应用退出时调用 `/control/v1/shutdown`。
 6. 超时未退出时由 Tauri 终止其启动的确切 PID。
 
-Core 使用单一监听端口；端口可配置，被占用时 sidecar 可以选择空闲端口，并由桌面端基于实际端口生成所有 Upstream 的 `base_url`。控制面和代理数据面使用不同 Token。
+当前桌面 sidecar 分别监听管理 API、反向网关和正向代理三个本机回环端口。端口必须互不冲突，桌面端基于实际端口生成 Upstream `base_url` 和正向代理地址。控制面和代理数据面使用不同 Token。
 
 ### 16.2 版本协商
 

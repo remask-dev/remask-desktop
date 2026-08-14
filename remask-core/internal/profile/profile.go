@@ -100,7 +100,7 @@ func Builtins() []Profile {
 			Operations: []Operation{
 				{ID: "list-models", Methods: []string{"GET"}, Paths: []string{"/v1/models"}, Passthrough: true},
 				{ID: "create-chat-completion", Methods: []string{"POST"}, Paths: []string{"/v1/chat/completions"}, RequestTextFields: []string{"/messages/*/content", "/messages/*/content/*/text"}, AssistantRoleFields: []string{"/messages/*/role"}, AssistantRoles: []string{"assistant"}, ResponseTextFields: []string{"/choices/*/message/content"}, StreamTextFields: []string{"/choices/*/delta/content"}, StreamChannelFields: []string{"/choices/*/index"}, StreamTerminalData: []string{"[DONE]"}},
-				{ID: "create-response", Methods: []string{"POST"}, Paths: []string{"/v1/responses"}, RequestTextFields: []string{"/input", "/input/*/content", "/input/*/content/*/text"}, AssistantRoleFields: []string{"/input/*/role"}, AssistantRoles: []string{"assistant"}, ResponseTextFields: []string{"/output/*/content/*/text"}, StreamTextFields: []string{"/delta"}, StreamChannelFields: []string{"/output_index", "/content_index"}},
+				{ID: "create-response", Methods: []string{"POST"}, Paths: []string{"/v1/responses"}, RequestTextFields: []string{"/instructions", "/input", "/input/*/content", "/input/*/content/*/text", "/input/*/content/*/content", "/input/*/arguments", "/input/*/output"}, AssistantRoleFields: []string{"/input/*/role"}, AssistantRoles: []string{"assistant"}, ResponseTextFields: []string{"/output/*/content/*/text", "/output/*/arguments"}, StreamTextFields: []string{"/delta"}, StreamChannelFields: []string{"/output_index", "/content_index", "/item_id"}},
 			},
 		},
 		{
@@ -109,13 +109,28 @@ func Builtins() []Profile {
 				{ID: "list-models", Methods: []string{"GET"}, Paths: []string{"/v1/models"}, Passthrough: true},
 				{
 					ID: "create-message", Methods: []string{"POST"}, Paths: []string{"/v1/messages"},
-					RequestTextFields:    []string{"/system", "/system/*/text", "/messages/*/content", "/messages/*/content/*/text"},
+					RequestTextFields:    []string{"/system", "/system/*/text", "/messages/*/content", "/messages/*/content/*/text", "/messages/*/content/*/content", "/messages/*/content/*/content/*/text"},
 					AssistantRoleFields:  []string{"/messages/*/role"},
 					AssistantRoles:       []string{"assistant"},
 					ResponseTextFields:   []string{"/content/*/text"},
-					StreamTextFields:     []string{"/delta/text"},
+					StreamTextFields:     []string{"/delta/text", "/delta/partial_json"},
 					StreamChannelFields:  []string{"/index"},
 					StreamTerminalEvents: []string{"message_stop"},
+				},
+			},
+		},
+		{
+			ID: "codex-chatgpt", Name: "Codex (ChatGPT login)",
+			Operations: []Operation{
+				{
+					ID: "create-codex-response", Methods: []string{"POST"},
+					Paths:               []string{"/backend-api/codex/responses", "/backend-api/codex/responses/*", "/backend-api/api/codex", "/backend-api/api/codex/responses", "/backend-api/api/codex/responses/*"},
+					RequestTextFields:   []string{"/instructions", "/input", "/input/*/content", "/input/*/content/*/text", "/input/*/content/*/content", "/input/*/arguments", "/input/*/output"},
+					AssistantRoleFields: []string{"/input/*/role"},
+					AssistantRoles:      []string{"assistant"},
+					ResponseTextFields:  []string{"/output/*/content/*/text", "/output/*/arguments"},
+					StreamTextFields:    []string{"/delta"},
+					StreamChannelFields: []string{"/output_index", "/content_index", "/item_id"},
 				},
 			},
 		},

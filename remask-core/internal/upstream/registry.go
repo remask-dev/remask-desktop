@@ -52,9 +52,11 @@ type Registry struct {
 }
 
 func DefaultUpstreams() []Upstream {
-	return []Upstream{{
-		ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough",
-	}}
+	return []Upstream{
+		{ID: "anthropic", BaseURL: "https://api.anthropic.com", ProfileID: "anthropic", CredentialMode: "passthrough"},
+		{ID: "codex-chatgpt", BaseURL: "https://chatgpt.com", ProfileID: "codex-chatgpt", CredentialMode: "passthrough"},
+		{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough"},
+	}
 }
 
 func NewRegistry(dataDir string) (*Registry, error) {
@@ -91,6 +93,15 @@ func NewRegistry(dataDir string) (*Registry, error) {
 			return nil, errors.New("duplicate upstream id")
 		}
 		registry.items[item.ID] = item
+	}
+	legacyOpenAI := Upstream{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough"}
+	if len(registry.items) == 1 && registry.items[legacyOpenAI.ID] == legacyOpenAI {
+		for _, item := range DefaultUpstreams() {
+			registry.items[item.ID] = item
+		}
+		if err := registry.persistLocked(); err != nil {
+			return nil, err
+		}
 	}
 	return registry, nil
 }
@@ -130,6 +141,41 @@ func (r *Registry) List() []Upstream {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+// FindByAuthority returns the first configured upstream whose base URL host
+// matches an HTTP proxy authority. Registry order is stable by service ID.
+func (r *Registry) FindByAuthority(authority string) (Upstream, bool) {
+	hostname, requestedPort := splitAuthority(authority)
+	if hostname == "" {
+		return Upstream{}, false
+	}
+	for _, item := range r.List() {
+		parsed, err := url.Parse(item.BaseURL)
+		if err != nil || !strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), hostname) {
+			continue
+		}
+		expectedPort := parsed.Port()
+		if expectedPort == "" {
+			if parsed.Scheme == "https" {
+				expectedPort = "443"
+			} else if parsed.Scheme == "http" {
+				expectedPort = "80"
+			}
+		}
+		if requestedPort == "" || expectedPort == requestedPort {
+			return item, true
+		}
+	}
+	return Upstream{}, false
+}
+
+func splitAuthority(authority string) (string, string) {
+	authority = strings.TrimSpace(authority)
+	if parsed, err := url.Parse("//" + authority); err == nil && parsed.Hostname() != "" {
+		return strings.ToLower(strings.TrimSuffix(parsed.Hostname(), ".")), parsed.Port()
+	}
+	return strings.ToLower(strings.Trim(strings.TrimSuffix(authority, "."), "[]")), ""
 }
 
 func (r *Registry) Delete(id string) error {

@@ -5,12 +5,46 @@ Go 实现的 PII 脱敏引擎与 HTTP JSON/SSE AI API 网关。
 ## Run
 
 ```bash
-go run ./cmd/remask-core --addr 127.0.0.1:17680 --proxy-addr 127.0.0.1:17681
+go run ./cmd/remask-core \
+  --addr 127.0.0.1:17680 \
+  --proxy-addr 127.0.0.1:17681 \
+  --forward-proxy-addr 127.0.0.1:17682
 ```
 
-管理、模型与脱敏 API 监听 `--addr`；AI HTTP JSON/SSE 代理单独监听 `--proxy-addr`。代理支持三种入口：`/proxy/{service-id}/...` 精确选择服务；当 service ID 不存在时，`/proxy/{configured-domain}/...` 按已配置 `base_url` 的域名匹配；直接请求 `/*` 时按 HTTP 方法与请求适配方案自动匹配服务。域名入口不会转发到未配置主机；存在多个匹配服务时使用 service ID 排序后的第一个服务。
+管理、模型与脱敏 API 监听 `--addr`；AI HTTP JSON/SSE 反向代理监听 `--proxy-addr`；标准 HTTP/HTTPS 正向代理监听 `--forward-proxy-addr`。反向代理支持三种入口：`/proxy/{service-id}/...` 精确选择服务；当 service ID 不存在时，`/proxy/{configured-domain}/...` 按已配置 `base_url` 的域名匹配；直接请求 `/*` 时按 HTTP 方法与请求适配方案自动匹配服务。域名入口不会转发到未配置主机；存在多个匹配服务时使用 service ID 排序后的第一个服务。
 
 当 Upstream 已配置，但请求方法或 Path 没有命中所选请求适配方案时，网关会透明转发请求和响应，不执行脱敏或还原。审计日志将该请求标记为 `protection_mode: passthrough`，避免将未受保护的请求误认为已脱敏。未配置的 Upstream 仍返回 `404 UPSTREAM_NOT_FOUND`。
+
+## HTTP/HTTPS 正向代理
+
+正向代理可以直接用于支持 `HTTP_PROXY`/`HTTPS_PROXY` 的现有程序。Remask 只解密已配置 Upstream 的 HTTPS 域名；未配置域名保持原始 TLS 字节隧道。已配置域名中未命中 Profile 的 Path、WebSocket、文件上传和其他未支持格式仍会透明转发，不会因无法识别而阻断。
+
+首次启动会在数据目录生成本地 CA：
+
+```text
+~/.remask/certificates/remask-ca.pem
+~/.remask/certificates/remask-ca-key.pem
+```
+
+私钥权限为 `0600`，不能复制到其他设备或交给第三方。CA 路径和 SHA-256 指纹可通过 `GET /api/v1/proxy/ca` 查询。
+
+Claude Code 示例：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:17682 \
+NODE_EXTRA_CA_CERTS="$HOME/.remask/certificates/remask-ca.pem" \
+claude
+```
+
+Codex CLI 示例：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:17682 \
+SSL_CERT_FILE="$HOME/.remask/certificates/remask-ca.pem" \
+codex
+```
+
+新数据目录会预置 `api.anthropic.com`、`api.openai.com` 和 ChatGPT 登录态 Codex 使用的 `chatgpt.com`。仅包含旧版 OpenAI 默认项的数据目录会自动补齐这三个预置项；自定义过的配置不会被改写，可在服务商页面手动添加对应 Upstream。当前对 Claude Messages、OpenAI Responses 和 Codex HTTP/SSE 请求执行字段级脱敏；WebSocket 连接保持透明，但不进行消息级脱敏。
 
 Upstream 配置、规则、审计设置和安全日志默认统一存放在用户 Home 的 `~/.remask` 隐藏目录，可通过 `--data-dir` 或 `REMASK_DATA_DIR` 指定。持久化数据统一使用 SQLite 数据库 `remask.db`，当前用于请求日志，后续可扩展其他本地数据；审计日志不会记录 Header、URL 查询参数或实体原文，只保存首尾保留的安全打码预览（如 `138***000`）、实际发送给上游的标签文本、实体标识与模型置信度。正则规则为确定性匹配，命中置信度固定为 `1.0`。普通规则使用 `<MASK_大写规则ID:四位码>`，模型继续使用 `<实体类型:四位码>`；实体类型开关只控制模型输出，普通规则由各自开关控制。
 
