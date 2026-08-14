@@ -315,6 +315,69 @@ func TestUnmatchedPathIsForwardedWithoutTransformation(t *testing.T) {
 	}
 }
 
+func TestUnmatchedModelPathUsesGenericStrategy(t *testing.T) {
+	var receivedBody string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		token := extractToken(receivedBody)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{` +
+				`"choices":[{"message":{"content":"` + token + `"}}],` +
+				`"content":[{"text":"` + token + `"}],` +
+				`"candidates":[{"content":{"parts":[{"text":"` + token + `"}]}}],` +
+				`"output":[{"content":[{"text":"` + token + `"}]}]` +
+				`}`)),
+			Request: r,
+		}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/custom-completions", strings.NewReader(`{`+
+		`"model":"custom-model",`+
+		`"instructions":"OpenAI foo@example.com",`+
+		`"messages":[{"role":"user","content":"Anthropic foo@example.com"}],`+
+		`"system":"System foo@example.com",`+
+		`"contents":[{"role":"user","parts":[{"text":"Gemini foo@example.com"}]}]`+
+		`}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || strings.Contains(receivedBody, "foo@example.com") || !strings.Contains(receivedBody, "<MASK_EMAIL:") {
+		t.Fatalf("generic fallback did not redact request: status=%d body=%q", response.Code, receivedBody)
+	}
+	if strings.Count(response.Body.String(), "foo@example.com") != 4 || strings.Contains(response.Body.String(), "<MASK_EMAIL:") {
+		t.Fatalf("generic fallback did not restore response: %s", response.Body.String())
+	}
+
+	logs := httptest.NewRecorder()
+	handler.ServeHTTP(logs, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs?limit=1", nil))
+	if !strings.Contains(logs.Body.String(), `"operation_id":"generic-model-request"`) || !strings.Contains(logs.Body.String(), `"protection_mode":"redacted"`) {
+		t.Fatalf("generic fallback audit entry missing: %s", logs.Body.String())
+	}
+}
+
+func TestAutoRouteUsesGenericStrategyForUnmatchedModelPath(t *testing.T) {
+	var receivedHost, receivedBody string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		receivedHost, receivedBody = r.URL.Host, string(body)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Request: r}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/custom-model-endpoint", strings.NewReader(`{"model":"custom-model","messages":[{"role":"user","content":"foo@example.com"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || receivedHost != "mock.example" || strings.Contains(receivedBody, "foo@example.com") {
+		t.Fatalf("auto generic fallback failed: status=%d host=%q body=%q", response.Code, receivedHost, receivedBody)
+	}
+}
+
 func TestMatchedInvalidJSONIsForwardedWithoutBlocking(t *testing.T) {
 	const requestBody = `{"messages":[broken`
 	var received string

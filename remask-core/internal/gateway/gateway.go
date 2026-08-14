@@ -63,6 +63,15 @@ func New(logger *log.Logger, upstreams *upstream.Registry, profiles *profile.Reg
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	configured, upstreamPath, operation, matched, routeErr := g.resolveRoute(r.Method, r.URL.Path)
 	if routeErr != nil {
+		// An automatic route has no provider path to match against. For a
+		// model-shaped POST, use the first configured service and let the
+		// provider-agnostic operation protect the request body.
+		if routeErr.code == "AUTO_UPSTREAM_NOT_FOUND" {
+			if fallback, ok := g.resolveGenericRoute(r); ok {
+				g.serveResolved(w, r, fallback, r.URL.Path, profile.GenericOperation(), true)
+				return
+			}
+		}
 		writeProxyError(w, routeErr.status, routeErr.code, routeErr.message)
 		return
 	}
@@ -130,6 +139,21 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		return
 	}
 	auditEntry.RequestBytes = int64(len(body))
+	if operationErr != nil && isJSON(r.Header.Get("Content-Type")) {
+		if fallback, fallbackErr := profile.GenericMatch(r.Method, body); fallbackErr == nil {
+			operation = fallback
+			operationErr = nil
+			operationID = operation.ID
+			if g.rules.Enabled() {
+				protectionMode = "redacted"
+			} else {
+				protectionMode = "disabled"
+			}
+			auditEntry.OperationID = operationID
+			auditEntry.ProtectionMode = protectionMode
+		}
+	}
+	passthrough = operationErr != nil || operation.Passthrough || !g.rules.Enabled()
 	contentEncoding := strings.TrimSpace(strings.ToLower(r.Header.Get("Content-Encoding")))
 	if !passthrough && (len(body) == 0 || !isJSON(r.Header.Get("Content-Type")) || !json.Valid(body) || (contentEncoding != "" && contentEncoding != "identity")) {
 		// A matched route with a representation we do not understand must remain
@@ -322,6 +346,27 @@ func (g *Gateway) resolveRoute(method, requestPath string) (upstream.Upstream, s
 	return upstream.Upstream{}, "", profile.Operation{}, false, &routeError{
 		status: http.StatusNotFound, code: "AUTO_UPSTREAM_NOT_FOUND", message: "no configured service profile matches this method and path",
 	}
+}
+
+func (g *Gateway) resolveGenericRoute(r *http.Request) (upstream.Upstream, bool) {
+	if !strings.EqualFold(r.Method, http.MethodPost) || !isJSON(r.Header.Get("Content-Type")) {
+		return upstream.Upstream{}, false
+	}
+	body, err := readBody(r.Body, maxBodyBytes)
+	if err != nil {
+		return upstream.Upstream{}, false
+	}
+	// The normal request path still owns the body; restore it after the route
+	// probe so redaction and forwarding see the original bytes.
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if _, err := profile.GenericMatch(r.Method, body); err != nil {
+		return upstream.Upstream{}, false
+	}
+	configured := g.upstreams.List()
+	if len(configured) == 0 {
+		return upstream.Upstream{}, false
+	}
+	return configured[0], true
 }
 
 func (g *Gateway) upstreamsByDomain(domain string) []upstream.Upstream {

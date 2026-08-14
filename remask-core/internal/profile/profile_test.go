@@ -1,6 +1,8 @@
 package profile
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestOpenAIProfileMatchesChatCompletionsAndResponses(t *testing.T) {
 	registry := NewRegistry(Builtins()...)
@@ -50,4 +52,44 @@ func TestBuiltinProfilesExposeAPIKeyHeaderTemplates(t *testing.T) {
 			t.Fatalf("profile %q missing header template %q", profileID, header)
 		}
 	}
+}
+
+func TestGenericMatchRecognizesModelRequestShapes(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"custom-model","messages":[{"role":"user","content":"hello"}]}`,
+		`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`,
+		`{"input":"hello"}`,
+	} {
+		operation, err := GenericMatch("POST", []byte(body))
+		if err != nil || operation.ID != "generic-model-request" {
+			t.Fatalf("generic match failed for %s: operation=%#v err=%v", body, operation, err)
+		}
+	}
+	if _, err := GenericMatch("GET", []byte(`{"model":"custom-model"}`)); err == nil {
+		t.Fatal("GET request should not use generic strategy")
+	}
+	if _, err := GenericMatch("POST", []byte(`{"payload":"ordinary request"}`)); err == nil {
+		t.Fatal("ordinary POST should not use generic strategy")
+	}
+}
+
+func TestGenericOperationCombinesProviderFields(t *testing.T) {
+	operation := GenericOperation()
+	for _, selector := range []string{
+		"/messages/*/content", "/system", "/input", "/contents/*/parts/*/text",
+		"/choices/*/message/content", "/content/*/text", "/candidates/*/content/parts/*/text",
+	} {
+		if !contains(operation.RequestTextFields, selector) && !contains(operation.ResponseTextFields, selector) {
+			t.Fatalf("generic operation missing provider selector %q", selector)
+		}
+	}
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

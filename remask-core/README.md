@@ -13,7 +13,7 @@ go run ./cmd/remask-core \
 
 管理、模型与脱敏 API 监听 `--addr`；AI HTTP JSON/SSE 反向代理监听 `--proxy-addr`；标准 HTTP/HTTPS 正向代理监听 `--forward-proxy-addr`。反向代理支持三种入口：`/proxy/{service-id}/...` 精确选择服务；当 service ID 不存在时，`/proxy/{configured-domain}/...` 按已配置 `base_url` 的域名匹配；直接请求 `/*` 时按 HTTP 方法与请求适配方案自动匹配服务。域名入口不会转发到未配置主机；存在多个匹配服务时使用 service ID 排序后的第一个服务。
 
-当 Upstream 已配置，但请求方法或 Path 没有命中所选请求适配方案时，网关会透明转发请求和响应，不执行脱敏或还原。审计日志将该请求标记为 `protection_mode: passthrough`，避免将未受保护的请求误认为已脱敏。未配置的 Upstream 仍返回 `404 UPSTREAM_NOT_FOUND`。
+当 Upstream 已配置，但请求方法或 Path 没有命中所选请求适配方案时，网关会检查 POST JSON 请求体；若存在 `model`、`messages`、`input` 或 `contents` 等模型请求特征，则使用合并 OpenAI、Anthropic 与 Gemini 字段的通用策略执行脱敏和响应还原。其他未知请求仍透明转发，并在审计日志中标记为 `protection_mode: passthrough`。直接入口无法按 Path 自动选路时，同类模型请求会兜底选择 service ID 排序后的第一个已配置 Upstream；未配置的 `/proxy/{service-id}/...` 仍返回 `404 UPSTREAM_NOT_FOUND`。
 
 ## HTTP/HTTPS 正向代理
 

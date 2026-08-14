@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"encoding/json"
 	"errors"
 	"path"
 	"strings"
@@ -72,6 +73,58 @@ func (r *Registry) Match(profileID, method, requestPath string) (Operation, erro
 		}
 	}
 	return Operation{}, ErrNoMatch
+}
+
+// GenericMatch returns the provider-agnostic operation for a POST body that
+// looks like a model request. The body check deliberately happens only after
+// normal method/path matching has failed, so ordinary unknown POST endpoints
+// continue to pass through unchanged.
+func GenericMatch(method string, body []byte) (Operation, error) {
+	if !strings.EqualFold(method, "POST") || len(body) == 0 {
+		return Operation{}, ErrNoMatch
+	}
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(body, &request); err != nil || request == nil {
+		return Operation{}, ErrNoMatch
+	}
+	for _, key := range []string{"model", "messages", "input", "contents"} {
+		if value, ok := request[key]; ok && len(value) > 0 && string(value) != "null" {
+			return GenericOperation(), nil
+		}
+	}
+	return Operation{}, ErrNoMatch
+}
+
+// GenericOperation combines the text and stream shapes used by OpenAI,
+// Anthropic, and Gemini. Selectors are intentionally broad enough for custom
+// provider paths while remaining limited to known request/response fields.
+func GenericOperation() Operation {
+	return Operation{
+		ID:      "generic-model-request",
+		Methods: []string{"POST"},
+		Paths:   []string{"*"},
+		RequestTextFields: []string{
+			"/prompt",
+			"/instructions", "/input", "/input/*/content", "/input/*/content/*/text", "/input/*/content/*/content", "/input/*/arguments", "/input/*/output",
+			"/system", "/system/*/text",
+			"/messages/*/content", "/messages/*/content/*/text", "/messages/*/content/*/content", "/messages/*/content/*/content/*/text",
+			"/system_instruction/parts/*/text", "/systemInstruction/parts/*/text",
+			"/contents/*/parts/*/text",
+		},
+		AssistantRoleFields: []string{"/messages/*/role", "/input/*/role", "/contents/*/role"},
+		AssistantRoles:      []string{"assistant", "model"},
+		ResponseTextFields: []string{
+			"/choices/*/text", "/choices/*/message/content", "/content/*/text", "/candidates/*/content/parts/*/text",
+			"/output/*/content/*/text", "/output/*/arguments",
+		},
+		StreamTextFields: []string{
+			"/choices/*/text", "/choices/*/delta/content", "/delta", "/delta/text", "/delta/partial_json",
+			"/candidates/*/content/parts/*/text",
+		},
+		StreamChannelFields:  []string{"/choices/*/index", "/output_index", "/content_index", "/item_id", "/index"},
+		StreamTerminalData:   []string{"[DONE]"},
+		StreamTerminalEvents: []string{"message_stop"},
+	}
 }
 
 func methodMatches(methods []string, method string) bool {
