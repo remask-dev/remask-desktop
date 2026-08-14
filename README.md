@@ -21,7 +21,13 @@ npm run build
 
 ## Development preview
 
-The browser preview at `http://127.0.0.1:1420/` does not spawn a sidecar. Run `remask-core` separately and keep the default management URL `http://127.0.0.1:17680` and proxy URL `http://127.0.0.1:17681` in the app.
+The browser preview at `http://127.0.0.1:1420/` does not spawn a sidecar. Run `remask-core` separately and keep the default management URL `http://127.0.0.1:17680`, gateway URL `http://127.0.0.1:17681`, and forward proxy URL `http://127.0.0.1:17682` in the app.
+
+## System proxy integration
+
+The desktop Settings view can install the generated Remask CA into the current user's operating-system trust store. macOS uses the login keychain, Windows uses the current-user Root store, and Linux uses `pkexec` plus `update-ca-certificates` when available. The confirmation dialog shows the CA SHA-256 fingerprint before installation; the CA private key never leaves `~/.remask`.
+
+The same view provides quick-launch buttons for Claude Code and Codex. Before launch, the desktop client adds any missing official Anthropic, OpenAI API, and ChatGPT Codex upstream domains without overwriting custom entries. A new terminal then starts with the Remask forward proxy and process-local CA variables already set. This does not modify the user's shell profile or global proxy settings. On macOS, reusable launchers are written under `~/.remask/launchers` with mode `0700`.
 
 ## Stage the desktop sidecar
 

@@ -1,4 +1,4 @@
-import type { ActiveModel, AuditLog, AuditSettings, AuditStats, AuditStatsRange, BootstrapData, ModelDownloadRequest, ModelPackage, Operation, PolicySettings, Profile, RedactResult, RuntimeStatus, Upstream, VersionResponse } from "./types";
+import type { ActiveModel, AuditLog, AuditSettings, AuditStats, AuditStatsRange, BootstrapData, ModelDownloadRequest, ModelPackage, Operation, PolicySettings, Profile, ProxyCAStatus, RedactResult, RuntimeStatus, Upstream, VersionResponse } from "./types";
 
 const trim = (value: string) => value.trim().replace(/\/$/, "");
 export const connection = {
@@ -8,6 +8,8 @@ export const connection = {
     return stored ? Number(stored) || 17681 : 17681;
   },
   proxy: () => `http://127.0.0.1:${connection.proxyPort()}`,
+  forwardProxyPort: () => 17682,
+  forwardProxy: () => `http://127.0.0.1:${connection.forwardProxyPort()}`,
   saveGatewayPort(port: number) { localStorage.setItem("remask.gatewayPort", String(port)); }
 };
 
@@ -28,12 +30,12 @@ function normalizeLogs(logs: AuditLog[] | null | undefined): AuditLog[] {
 
 export const coreApi = {
   async bootstrap(): Promise<BootstrapData> {
-    const [version, profiles, upstreams, models, active, settings, policy, stats, logs] = await Promise.all([
-      request<VersionResponse>("/api/v1/version"), request<{profiles: Profile[]}>("/api/v1/profiles"), request<{upstreams: Upstream[]}>("/api/v1/upstreams"),
+    const [version, proxyCA, profiles, upstreams, models, active, settings, policy, stats, logs] = await Promise.all([
+      request<VersionResponse>("/api/v1/version"), request<ProxyCAStatus>("/api/v1/proxy/ca"), request<{profiles: Profile[]}>("/api/v1/profiles"), request<{upstreams: Upstream[]}>("/api/v1/upstreams"),
       request<{models: ModelPackage[]; runtime: RuntimeStatus}>("/api/v1/models"), request<{active: boolean; model: ActiveModel; runtime: RuntimeStatus}>("/api/v1/models/active"),
       request<{audit: AuditSettings}>("/api/v1/settings"), request<PolicySettings>("/api/v1/policy"), request<AuditStats>("/api/v1/audit/stats?range=today"), request<{logs: AuditLog[]}>("/api/v1/audit/logs?limit=100")
     ]);
-    return { version, profiles: profiles.profiles, upstreams: upstreams.upstreams, models: models.models, runtime: models.runtime, activeModel: active.active ? active.model : null, settings: settings.audit, policy, stats, logs: normalizeLogs(logs.logs) };
+    return { version, proxyCA, profiles: profiles.profiles, upstreams: upstreams.upstreams, models: models.models, runtime: models.runtime, activeModel: active.active ? active.model : null, settings: settings.audit, policy, stats, logs: normalizeLogs(logs.logs) };
   },
   stats: (range: AuditStatsRange) => request<AuditStats>(`/api/v1/audit/stats?range=${range}`),
   logs: async (query = "") => { const result = await request<{logs: AuditLog[]}>(`/api/v1/audit/logs?limit=100${query}`); return { logs: normalizeLogs(result.logs) }; },

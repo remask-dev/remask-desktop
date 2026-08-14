@@ -12,6 +12,8 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+mod system_integration;
+
 /// True once the user asked the app to quit from the tray. Closing the window
 /// hides it to the tray instead of exiting, unless a real quit is in progress.
 static QUITTING: AtomicBool = AtomicBool::new(false);
@@ -29,8 +31,15 @@ fn start_core(
     state: State<'_, CoreProcess>,
     address: String,
     proxy_address: String,
+    forward_proxy_address: String,
 ) -> Result<(), String> {
-    spawn_core(&app, state.inner(), &address, &proxy_address)
+    spawn_core(
+        &app,
+        state.inner(),
+        &address,
+        &proxy_address,
+        &forward_proxy_address,
+    )
 }
 
 fn spawn_core(
@@ -38,6 +47,7 @@ fn spawn_core(
     state: &CoreProcess,
     address: &str,
     proxy_address: &str,
+    forward_proxy_address: &str,
 ) -> Result<(), String> {
     let listen_address: SocketAddr = address
         .parse()
@@ -56,6 +66,22 @@ fn spawn_core(
     if proxy_listen_address == listen_address {
         return Err("core and proxy addresses must use different ports".to_string());
     }
+    let forward_proxy_listen_address: SocketAddr = forward_proxy_address
+        .parse()
+        .map_err(|_| "forward proxy address must be an IP address and port")?;
+    if !forward_proxy_listen_address.ip().is_loopback() || forward_proxy_listen_address.port() == 0
+    {
+        return Err(
+            "desktop forward proxy must listen on a loopback address and non-zero port".to_string(),
+        );
+    }
+    if forward_proxy_listen_address == listen_address
+        || forward_proxy_listen_address == proxy_listen_address
+    {
+        return Err(
+            "core, gateway, and forward proxy addresses must use different ports".to_string(),
+        );
+    }
 
     let mut process = state.0.lock().map_err(|_| "core process lock poisoned")?;
     if process.is_some() {
@@ -65,6 +91,8 @@ fn spawn_core(
     let mut args = vec!["--addr".to_string(), listen_address.to_string()];
     args.push("--proxy-addr".to_string());
     args.push(proxy_listen_address.to_string());
+    args.push("--forward-proxy-addr".to_string());
+    args.push(forward_proxy_listen_address.to_string());
     let resource_dir = app
         .path()
         .resource_dir()
@@ -195,6 +223,31 @@ fn stop_core(state: State<'_, CoreProcess>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn system_certificate_status(
+    app: AppHandle,
+) -> Result<system_integration::CertificateTrustStatus, String> {
+    system_integration::certificate_status(&app)
+}
+
+#[tauri::command]
+async fn install_system_certificate(
+    app: AppHandle,
+) -> Result<system_integration::CertificateTrustStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || system_integration::install_certificate(&app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn launch_ai_client(
+    app: AppHandle,
+    client: String,
+    forward_proxy_address: String,
+) -> Result<(), String> {
+    system_integration::launch_client(&app, &client, &forward_proxy_address)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -265,6 +318,7 @@ pub fn run() {
                 app.state::<CoreProcess>().inner(),
                 "127.0.0.1:17680",
                 "127.0.0.1:17681",
+                "127.0.0.1:17682",
             ) {
                 eprintln!("failed to start remask-core: {error}");
             }
@@ -278,7 +332,13 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![start_core, stop_core])
+        .invoke_handler(tauri::generate_handler![
+            start_core,
+            stop_core,
+            system_certificate_status,
+            install_system_certificate,
+            launch_ai_client
+        ])
         .run(tauri::generate_context!())
         .expect("error while running remask-desktop");
 }
