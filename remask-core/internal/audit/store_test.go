@@ -179,3 +179,52 @@ func TestStatsHandlesFractionalAverageLatency(t *testing.T) {
 		t.Fatalf("unexpected fractional average result: %#v", stats)
 	}
 }
+
+func TestStatsRangeUsesHourlyBucketsAndExcludesFutureTime(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	location := time.FixedZone("test-local", 8*60*60)
+	current := time.Now().In(location)
+	now := time.Date(current.Year(), current.Month(), current.Day(), 12, 30, 0, 0, location)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
+	entries := []Entry{
+		{Timestamp: today.Add(time.Hour + 15*time.Minute), StatusCode: 200, EntityCount: 2},
+		{Timestamp: today.Add(12*time.Hour + 15*time.Minute), StatusCode: 200, EntityCount: 3},
+		{Timestamp: today.Add(13*time.Hour + 15*time.Minute), StatusCode: 200, EntityCount: 50},
+		{Timestamp: today.AddDate(0, 0, -1).Add(23 * time.Hour), StatusCode: 200, EntityCount: 4},
+	}
+	for _, entry := range entries {
+		if err := store.Add(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	todayStats := store.statsForRange("today", now)
+	if todayStats.Granularity != "hour" || len(todayStats.Daily) != 24 {
+		t.Fatalf("unexpected today series: %#v", todayStats)
+	}
+	if todayStats.Requests != 2 || todayStats.Entities != 5 {
+		t.Fatalf("today stats must exclude future and yesterday entries: %#v", todayStats)
+	}
+	if todayStats.Daily[1].Requests != 1 || todayStats.Daily[12].Entities != 3 {
+		t.Fatalf("requests were not placed in local hourly buckets: %#v", todayStats.Daily)
+	}
+	if todayStats.Daily[13].Requests != 0 || todayStats.Daily[13].Entities != 0 {
+		t.Fatalf("future hourly buckets must not include future audit data: %#v", todayStats.Daily[13])
+	}
+
+	yesterdayStats := store.statsForRange("yesterday", now)
+	if yesterdayStats.Granularity != "hour" || len(yesterdayStats.Daily) != 24 {
+		t.Fatalf("unexpected yesterday series: %#v", yesterdayStats)
+	}
+	if yesterdayStats.Requests != 1 || yesterdayStats.Daily[23].Entities != 4 {
+		t.Fatalf("unexpected yesterday aggregation: %#v", yesterdayStats)
+	}
+
+	monthStats := store.statsForRange("30d", now)
+	if monthStats.Granularity != "day" || len(monthStats.Daily) != 30 {
+		t.Fatalf("unexpected 30-day series: %#v", monthStats)
+	}
+}

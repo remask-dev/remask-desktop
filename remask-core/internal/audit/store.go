@@ -128,6 +128,7 @@ type Stats struct {
 	TokenTotal     int            `json:"token_total"`
 	TokenCached    int            `json:"token_cached"`
 	TokensPerMin   float64        `json:"tokens_per_minute"`
+	Granularity    string         `json:"granularity"`
 }
 
 type Store struct {
@@ -372,14 +373,66 @@ func (s *Store) Stats(days int) Stats {
 	}
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -(days - 1)).Truncate(24 * time.Hour)
-	result := Stats{EntityTypes: make(map[string]int), Daily: make([]DailyPoint, days)}
-	dailyIndex := make(map[string]int, days)
+	points := make([]DailyPoint, days)
 	for index := range days {
 		date := start.AddDate(0, 0, index).Format("2006-01-02")
-		result.Daily[index] = DailyPoint{Date: date}
-		dailyIndex[date] = index
+		points[index] = DailyPoint{Date: date}
 	}
-	startText := start.Format(timestampLayout)
+	return s.statsBetween(start, now.Add(time.Nanosecond), points, "day", time.UTC)
+}
+
+// StatsRange returns calendar-aligned overview data in the machine's local
+// timezone. Day-sized ranges use hourly buckets; longer ranges use daily
+// buckets. Today's axis covers the full calendar day, while the query's upper
+// bound remains now so future audit data is never included.
+func (s *Store) StatsRange(period string) Stats {
+	return s.statsForRange(period, time.Now())
+}
+
+func (s *Store) statsForRange(period string, now time.Time) Stats {
+	location := now.Location()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
+	start := today
+	end := now.Add(time.Nanosecond)
+	granularity := "hour"
+	points := make([]DailyPoint, 0, 30)
+
+	switch period {
+	case "today":
+		for cursor, tomorrow := today, today.AddDate(0, 0, 1); cursor.Before(tomorrow); cursor = cursor.Add(time.Hour) {
+			points = append(points, DailyPoint{Date: cursor.Format(time.RFC3339)})
+		}
+	case "yesterday":
+		start = today.AddDate(0, 0, -1)
+		end = today
+		for cursor := start; cursor.Before(end); cursor = cursor.Add(time.Hour) {
+			points = append(points, DailyPoint{Date: cursor.Format(time.RFC3339)})
+		}
+	case "30d":
+		start = today.AddDate(0, 0, -29)
+		granularity = "day"
+		for index := range 30 {
+			points = append(points, DailyPoint{Date: start.AddDate(0, 0, index).Format("2006-01-02")})
+		}
+	default:
+		start = today.AddDate(0, 0, -6)
+		granularity = "day"
+		for index := range 7 {
+			points = append(points, DailyPoint{Date: start.AddDate(0, 0, index).Format("2006-01-02")})
+		}
+	}
+
+	return s.statsBetween(start, end, points, granularity, location)
+}
+
+func (s *Store) statsBetween(start, end time.Time, points []DailyPoint, granularity string, location *time.Location) Stats {
+	result := Stats{EntityTypes: make(map[string]int), Daily: points, Granularity: granularity}
+	pointIndex := make(map[string]int, len(points))
+	for index, point := range points {
+		pointIndex[point.Date] = index
+	}
+	startText := start.UTC().Format(timestampLayout)
+	endText := end.UTC().Format(timestampLayout)
 	var success int
 	var averageLatency float64
 	var activeMinutes int
@@ -389,7 +442,7 @@ func (s *Store) Stats(days int) Stats {
 		COALESCE(SUM(token_input), 0), COALESCE(SUM(token_output), 0),
 		COALESCE(SUM(token_total), 0), COALESCE(SUM(token_cached), 0),
 		COUNT(DISTINCT substr(timestamp, 1, 16))
-		FROM audit_entries WHERE timestamp >= ?`, startText).Scan(
+		FROM audit_entries WHERE timestamp >= ? AND timestamp < ?`, startText, endText).Scan(
 		&result.Requests, &result.Entities, &success, &averageLatency, &result.Streaming,
 		&result.TokenInput, &result.TokenOutput, &result.TokenTotal, &result.TokenCached, &activeMinutes)
 	result.AverageLatency = int64(averageLatency)
@@ -399,16 +452,25 @@ func (s *Store) Stats(days int) Stats {
 	if activeMinutes > 0 {
 		result.TokensPerMin = float64(result.TokenTotal) / float64(activeMinutes)
 	}
-	rows, err := s.db.Query(`SELECT substr(timestamp, 1, 10), COUNT(*), COALESCE(SUM(entity_count), 0)
-		FROM audit_entries WHERE timestamp >= ? GROUP BY substr(timestamp, 1, 10)`, startText)
+	rows, err := s.db.Query(`SELECT timestamp, entity_count
+		FROM audit_entries WHERE timestamp >= ? AND timestamp < ?`, startText, endText)
 	if err == nil {
 		for rows.Next() {
-			var date string
-			var requests, entities int
-			if rows.Scan(&date, &requests, &entities) == nil {
-				if index, ok := dailyIndex[date]; ok {
-					result.Daily[index].Requests = requests
-					result.Daily[index].Entities = entities
+			var timestamp string
+			var entities int
+			if rows.Scan(&timestamp, &entities) == nil {
+				parsed, parseErr := time.Parse(timestampLayout, timestamp)
+				if parseErr != nil {
+					continue
+				}
+				local := parsed.In(location)
+				key := local.Format("2006-01-02")
+				if granularity == "hour" {
+					key = local.Format("2006-01-02T15:00:00Z07:00")
+				}
+				if index, ok := pointIndex[key]; ok {
+					result.Daily[index].Requests++
+					result.Daily[index].Entities += entities
 				}
 			}
 		}
@@ -416,7 +478,7 @@ func (s *Store) Stats(days int) Stats {
 	}
 	entityRows, err := s.db.Query(`SELECT t.entity_type, COALESCE(SUM(t.count), 0)
 		FROM audit_entity_types t JOIN audit_entries e ON e.id = t.entry_id
-		WHERE e.timestamp >= ? GROUP BY t.entity_type`, startText)
+		WHERE e.timestamp >= ? AND e.timestamp < ? GROUP BY t.entity_type`, startText, endText)
 	if err == nil {
 		for entityRows.Next() {
 			var entityType string

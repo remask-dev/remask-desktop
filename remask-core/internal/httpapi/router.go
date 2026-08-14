@@ -291,6 +291,15 @@ func (r *Router) clearAuditLogs(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Router) auditStats(w http.ResponseWriter, request *http.Request) {
+	if period := request.URL.Query().Get("range"); period != "" {
+		switch period {
+		case "today", "yesterday", "7d", "30d":
+			writeJSON(w, http.StatusOK, r.audits.StatsRange(period))
+		default:
+			writeError(w, http.StatusBadRequest, "RANGE_INVALID", "range must be today, yesterday, 7d, or 30d")
+		}
+		return
+	}
 	days := 7
 	if value := request.URL.Query().Get("days"); value != "" {
 		parsed, err := strconv.Atoi(value)

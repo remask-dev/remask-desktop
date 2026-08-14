@@ -23,7 +23,7 @@ import { useMutation } from "@tanstack/react-query";
 const icons = { overview: Gauge, logs: FileClock, test: FlaskConical, services: Bot, models: Activity, rules: ListChecks, settings: Settings };
 export function Shell() {
   const { t } = useI18n(); const { view, setView, toast, notify } = useApp(); const queryClient = useQueryClient();
-  const days=7; const core = useCore(days); const connected = Boolean(core.data);
+  const core = useCore(); const connected = Boolean(core.data);
   const initialLoading = core.isPending && !core.data;
   const meta: Record<View, [string,string]> = { overview:[t("overviewTitle"),t("overviewSub")], logs:[t("logsTitle"),t("logsSub")], test:[t("testTitle"),t("testSub")], services:[t("servicesTitle"),t("servicesSub")], models:[t("modelsTitle"),t("modelsSub")], rules:[t("rulesTitle"),t("rulesSub")], settings:[t("settingsTitle"),t("settingsSub")] };
   const nav: View[] = ["overview","logs","test","rules","services","models"];
