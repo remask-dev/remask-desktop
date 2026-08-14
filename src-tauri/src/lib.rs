@@ -1,10 +1,20 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_shell::{process::CommandChild, ShellExt};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_shell::{
+    process::{CommandChild, CommandEvent},
+    ShellExt,
+};
+
+/// True once the user asked the app to quit from the tray. Closing the window
+/// hides it to the tray instead of exiting, unless a real quit is in progress.
+static QUITTING: AtomicBool = AtomicBool::new(false);
 
 struct CoreProcess(Mutex<Option<CommandChild>>);
 
@@ -20,6 +30,15 @@ fn start_core(
     address: String,
     proxy_address: String,
 ) -> Result<(), String> {
+    spawn_core(&app, state.inner(), &address, &proxy_address)
+}
+
+fn spawn_core(
+    app: &AppHandle,
+    state: &CoreProcess,
+    address: &str,
+    proxy_address: &str,
+) -> Result<(), String> {
     let listen_address: SocketAddr = address
         .parse()
         .map_err(|_| "core address must be an IP address and port")?;
@@ -30,7 +49,9 @@ fn start_core(
         .parse()
         .map_err(|_| "proxy address must be an IP address and port")?;
     if !proxy_listen_address.ip().is_loopback() || proxy_listen_address.port() == 0 {
-        return Err("desktop proxy must listen on a loopback address and non-zero port".to_string());
+        return Err(
+            "desktop proxy must listen on a loopback address and non-zero port".to_string(),
+        );
     }
     if proxy_listen_address == listen_address {
         return Err("core and proxy addresses must use different ports".to_string());
@@ -44,7 +65,10 @@ fn start_core(
     let mut args = vec!["--addr".to_string(), listen_address.to_string()];
     args.push("--proxy-addr".to_string());
     args.push(proxy_listen_address.to_string());
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
     let bundled_resources = resource_dir.join("resources");
     let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
     let remask_dir = home_dir.join(".remask");
@@ -54,7 +78,9 @@ fn start_core(
     let models_dir = remask_dir.join("models");
     if !models_dir.exists() {
         if let Err(error) = copy_dir_all(&bundled_resources.join("models"), &models_dir) {
-            if error.kind() != std::io::ErrorKind::NotFound { return Err(error.to_string()); }
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(error.to_string());
+            }
             std::fs::create_dir_all(&models_dir).map_err(|error| error.to_string())?;
         }
     }
@@ -63,8 +89,16 @@ fn start_core(
     args.push("--models-dir".to_string());
     args.push(models_dir.to_string_lossy().into_owned());
     if let Some(bundled_model_id) = bundled_active_model(&bundled_resources) {
-        args.push("--active-model".to_string());
-        args.push(bundled_model_id);
+        // A user model directory can already exist without the bundled model.
+        // Only request activation when that concrete package is installed.
+        if models_dir
+            .join(&bundled_model_id)
+            .join("manifest.json")
+            .is_file()
+        {
+            args.push("--active-model".to_string());
+            args.push(bundled_model_id);
+        }
     }
     if let Some(runtime_library) = find_runtime_library(&bundled_resources) {
         args.push("--onnxruntime-lib".to_string());
@@ -76,8 +110,40 @@ fn start_core(
         .sidecar("remask-core")
         .map_err(|error| error.to_string())?
         .args(args);
-    let (_events, child) = command.spawn().map_err(|error| error.to_string())?;
+    let (mut events, child) = command.spawn().map_err(|error| error.to_string())?;
+    let pid = child.pid();
     *process = Some(child);
+    drop(process);
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    eprintln!("remask-core: {}", String::from_utf8_lossy(&line));
+                }
+                CommandEvent::Stderr(line) => {
+                    eprintln!("remask-core: {}", String::from_utf8_lossy(&line));
+                }
+                CommandEvent::Error(error) => {
+                    eprintln!("remask-core event error: {error}");
+                }
+                CommandEvent::Terminated(payload) => {
+                    eprintln!(
+                        "remask-core exited code={:?} signal={:?}",
+                        payload.code, payload.signal
+                    );
+                    let state = app_handle.state::<CoreProcess>();
+                    if let Ok(mut current) = state.0.lock() {
+                        if current.as_ref().is_some_and(|child| child.pid() == pid) {
+                            current.take();
+                        }
+                    };
+                }
+                _ => {}
+            }
+        }
+    });
     Ok(())
 }
 
@@ -86,8 +152,11 @@ fn copy_dir_all(source: &Path, destination: &Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
         let target = destination.join(entry.file_name());
-        if entry.file_type()?.is_dir() { copy_dir_all(&entry.path(), &target)?; }
-        else { std::fs::copy(entry.path(), target)?; }
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
     }
     Ok(())
 }
@@ -130,8 +199,14 @@ fn stop_core(state: State<'_, CoreProcess>) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .manage(CoreProcess(Mutex::new(None)))
         .setup(|app| {
+            let launched_at_login = std::env::args().any(|arg| arg == "--autostart");
+
             let window = if let Some(window) = app.get_webview_window("main") {
                 window
             } else {
@@ -142,12 +217,76 @@ pub fn run() {
                     .visible(false)
                     .build()?
             };
-            window.show()?;
-            window.unminimize()?;
-            window.set_focus()?;
+
+            // System tray icon: left-click shows the window, the menu offers
+            // show and a real quit (closing the window only hides to the tray).
+            // The tray uses a monochrome mark; macOS renders it as a template
+            // image so it adapts to light and dark menu bars.
+            let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let tray_icon = tauri::include_image!("icons/tray-icon.png");
+            let _tray = TrayIconBuilder::new()
+                .icon(tray_icon)
+                .icon_as_template(cfg!(target_os = "macos"))
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => show_main_window(app),
+                    "quit" => {
+                        QUITTING.store(true, Ordering::Relaxed);
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // Launched at login: run minimized in the tray. Manual launches
+            // show the main window as usual.
+            if launched_at_login {
+                let _ = window.hide();
+            } else {
+                window.show()?;
+                window.unminimize()?;
+                window.set_focus()?;
+            }
+            if let Err(error) = spawn_core(
+                app.handle(),
+                app.state::<CoreProcess>().inner(),
+                "127.0.0.1:17680",
+                "127.0.0.1:17681",
+            ) {
+                eprintln!("failed to start remask-core: {error}");
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && !QUITTING.load(Ordering::Relaxed) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![start_core, stop_core])
         .run(tauri::generate_context!())
         .expect("error while running remask-desktop");
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }

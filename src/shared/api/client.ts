@@ -47,5 +47,6 @@ export const coreApi = {
   downloadModel: (input: ModelDownloadRequest) => request<{operation_id: string; model_id: string}>("/api/v1/models/download", { method: "POST", body: JSON.stringify(input) }),
   activateModel: (id: string) => request<{operation_id: string}>(`/api/v1/models/${encodeURIComponent(id)}/activate`, { method: "POST", body: "{}" }),
   unloadModel: (id: string) => request<void>(`/api/v1/models/${encodeURIComponent(id)}/unload`, { method: "POST", body: "{}" }),
+  deleteModel: (id: string) => request<void>(`/api/v1/models/${encodeURIComponent(id)}`, { method: "DELETE" }),
   operation: (id: string) => request<Operation>(`/api/v1/operations/${encodeURIComponent(id)}`)
 };

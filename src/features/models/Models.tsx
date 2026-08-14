@@ -1,4 +1,4 @@
-import { Box, CheckCircle2, Download, Plus, RefreshCw } from "lucide-react";
+import { Box, CheckCircle2, Plus, RefreshCw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { coreApi } from "../../shared/api/client";
@@ -10,12 +10,16 @@ import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Input } from "../../shared/ui/Input";
 
-type DownloadState = {
-  operationId: string;
+type PendingDownload = {
   modelId: string;
+  name: string;
+  quantization: string;
+  operationId: string;
   status: Operation["status"];
   progress: number;
   error?: string;
+  repo: string;
+  variant?: string;
 };
 
 export function Models({ data }: { data: BootstrapData }) {
@@ -26,11 +30,18 @@ export function Models({ data }: { data: BootstrapData }) {
   const [manual, setManual] = useState(false);
   const [repo, setRepo] = useState("");
   const [variant, setVariant] = useState("");
-  const [downloading, setDownloading] = useState<DownloadState | null>(null);
+  const [pending, setPending] = useState<PendingDownload | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const current = data.models.find(item => item.id === selected) || data.models[0];
+  const pendingSelected = pending !== null && selected === pending.modelId;
 
   const scan = useMutation({ mutationFn: coreApi.scanModels, onSuccess: () => qc.invalidateQueries() });
   const unload = useMutation({ mutationFn: coreApi.unloadModel, onSuccess: () => qc.invalidateQueries() });
+  const remove = useMutation({
+    mutationFn: coreApi.deleteModel,
+    onSuccess: () => { setDeleteTarget(null); setSelected(""); qc.invalidateQueries(); },
+    onError: error => notify(String(error)),
+  });
 
   const activate = useMutation({
     mutationFn: coreApi.activateModel,
@@ -38,57 +49,78 @@ export function Models({ data }: { data: BootstrapData }) {
     onError: error => notify(String(error)),
   });
 
+  // The backend resolves and validates the repository before this mutation
+  // resolves, so a success here means the model is known to be downloadable:
+  // it appears in the list immediately with a "downloading" state.
   const download = useMutation({
     mutationFn: coreApi.downloadModel,
     onSuccess: async (result, variables) => {
       setManual(false);
-      setDownloading({ operationId: result.operation_id, modelId: result.model_id, status: "pending", progress: 0 });
+      setPending({
+        modelId: result.model_id, name: repoShortName(variables.repo), quantization: variables.variant || "default",
+        operationId: result.operation_id, status: "running", progress: 5, repo: variables.repo, variant: variables.variant,
+      });
       try {
-        await pollOperation(result.operation_id, () => {
-          setSelected(result.model_id);
-          qc.invalidateQueries();
-          notify(t("downloadComplete"));
-        });
+        await pollDownload(result.operation_id, result.model_id);
       } catch (error) {
         notify(String(error));
-      } finally {
-        setDownloading(null);
-        if (!variables.variant) setVariant("");
       }
     },
-    onError: error => { setDownloading(null); notify(String(error)); },
+    onError: error => { setPending(null); notify(String(error)); },
   });
 
-  // Poll the Core operation and surface progress through the list placeholder.
-  // A live operation is reported per (status, progress); the resolver runs on
-  // success and the caller clears the placeholder afterwards.
+  async function pollDownload(operationId: string, modelId: string) {
+    for (let attempt = 0; attempt < 1440; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const op = await coreApi.operation(operationId);
+      if (op.status === "succeeded") {
+        setPending(null);
+        setSelected(modelId);
+        qc.invalidateQueries();
+        notify(t("downloadComplete"));
+        return;
+      }
+      if (op.status === "failed") {
+        // Keep the row so the user can inspect the error and retry from the detail pane.
+        setPending(prev => prev ? { ...prev, status: "failed", progress: 100, error: op.error } : prev);
+        return;
+      }
+      if (op.status === "cancelled") { setPending(null); return; }
+      setPending(prev => prev ? { ...prev, status: op.status, progress: op.progress ?? prev.progress } : prev);
+    }
+    setPending(null);
+  }
+
+  // Poll a Core operation until it settles; used for model activation.
   async function pollOperation(operationId: string, onSuccess: () => void) {
     for (let attempt = 0; attempt < 720; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 500));
       const op = await coreApi.operation(operationId);
-      setDownloading(prev => prev ? { ...prev, status: op.status, progress: op.progress ?? prev.progress, error: op.error } : prev);
       if (op.status === "succeeded") { onSuccess(); return; }
-      if (op.status === "failed") { throw new Error(`${t("downloadFailed")}: ${op.error || ""}`.trim()); }
+      if (op.status === "failed") { throw new Error(op.error || t("downloadFailed")); }
       if (op.status === "cancelled") { return; }
     }
-    throw new Error(t("downloadFailed"));
   }
 
   function startDownload() {
     download.mutate({ repo: repo.trim(), variant: variant.trim() || undefined });
   }
 
+  function retryDownload() {
+    if (!pending) return;
+    download.mutate({ repo: pending.repo, variant: pending.variant });
+  }
+
   return <div className="split-view">
     <section className="list-pane">
       <div className="pane-title">
-        <div><span>{t("localModels")}</span><small>{data.runtime.name}</small></div>
-        <div>
+        <div><span>{t("localModels")}</span><small>{data.runtime.name}{data.runtime.provider ? ` · ${data.runtime.provider}` : ""}</small></div>
+        <div className="pane-title__actions">
           <Button size="icon" variant="ghost" onClick={() => setManual(true)} aria-label={t("downloadModel")}><Plus size={14}/></Button>
           <Button size="icon" variant="ghost" onClick={() => scan.mutate()} aria-label={t("scanModels")}><RefreshCw size={14}/></Button>
         </div>
       </div>
       <div className="model-list">
-        {downloading && <DownloadingItem state={downloading} repo={repo}/>}
         {data.models.map(item => (
           <button key={item.id} className={current?.id === item.id ? "selected" : ""} onClick={() => setSelected(item.id)}>
             <span className="model-icon"><Box size={16}/></span>
@@ -100,12 +132,26 @@ export function Models({ data }: { data: BootstrapData }) {
             <StatusDot tone={item.active ? "success" : item.valid ? "muted" : "error"}/>
           </button>
         ))}
+        {pending && <button key={`pending-${pending.modelId}`} className={`model-pending ${pendingSelected ? "selected" : ""}`}
+          title={pending.status === "failed" ? t("downloadFailed") : t("downloading")} onClick={() => setSelected(pending.modelId)}>
+          <span className="model-icon"><Box size={16}/></span>
+          <div>
+            <strong>{pending.name}</strong>
+            <code>{pending.modelId}</code>
+            <small>{pending.status === "failed" ? t("downloadFailed") : t("downloading")}</small>
+          </div>
+          <StatusDot tone={pending.status === "failed" ? "error" : "warning"}/>
+        </button>}
       </div>
     </section>
     <section className="detail-pane">
-      {current
-        ? <ModelDetail model={current} runtimeAvailable={data.runtime.available} onActivate={id => activate.mutate(id)} onUnload={id => unload.mutate(id)} activatePending={activate.isPending}/>
-        : <div className="detail-empty"><span className="detail-empty__icon"><Box size={24}/></span><h2>{t("downloadModel")}</h2><p>{t("noModels")}</p></div>}
+      {pendingSelected
+        ? <PendingDetail pending={pending} retrying={download.isPending} onRetry={retryDownload}/>
+        : current
+          ? <ModelDetail model={current} runtimeAvailable={data.runtime.available}
+              onActivate={id => activate.mutate(id)} onUnload={id => unload.mutate(id)}
+              onDelete={id => setDeleteTarget(id)} activatePending={activate.isPending}/>
+          : <div className="detail-empty"><span className="detail-empty__icon"><Box size={24}/></span><h2>{t("downloadModel")}</h2><p>{t("noModels")}</p></div>}
     </section>
     <Dialog open={manual} title={t("manualModelDownload")} onClose={() => setManual(false)}
       footer={<>
@@ -117,28 +163,50 @@ export function Models({ data }: { data: BootstrapData }) {
         <label className="field"><span>{t("quantizationOptional")}</span><Input placeholder={t("quantizationHint")} value={variant} onChange={event => setVariant(event.target.value)}/></label>
       </div>
     </Dialog>
+    <Dialog open={deleteTarget !== null} title={t("confirmDeleteModel")} onClose={() => setDeleteTarget(null)}
+      footer={<>
+        <Button onClick={() => setDeleteTarget(null)}>{t("cancel")}</Button>
+        <Button variant="danger" onClick={() => deleteTarget && remove.mutate(deleteTarget)}>{t("confirm")}</Button>
+      </>}>
+      <p className="dialog-message">{t("deleteModel")}</p>
+    </Dialog>
   </div>;
 }
 
-function DownloadingItem({ state, repo }: { state: DownloadState; repo: string }) {
+function PendingDetail({ pending, retrying, onRetry }: { pending: PendingDownload; retrying: boolean; onRetry: () => void }) {
   const { t } = useI18n();
-  const resolving = state.progress >= 85;
-  const label = state.status === "failed" ? t("downloadFailed") : resolving ? t("parsing") : state.status === "pending" ? t("queued") : t("downloading");
-  return <div className="model-download-item">
-    <span className="model-icon"><Download size={16}/></span>
-    <div>
-      <strong>{label}</strong>
-      <code>{repo || state.modelId}</code>
-      <div className="model-progress" aria-hidden="true"><i style={{ width: `${Math.max(4, Math.min(100, state.progress))}%` }}/></div>
-    </div>
-  </div>;
+  const failed = pending.status === "failed";
+  const label = failed ? t("downloadFailed") : pending.progress >= 85 ? t("parsing") : t("downloading");
+  return <>
+    <header className="detail-header">
+      <div>
+        <span>{t("downloadStatus")}</span>
+        <h2>{pending.name}</h2>
+        <code>{pending.modelId}</code>
+      </div>
+      <div className="header-actions">
+        {failed && <Button variant="primary" icon={<RotateCw size={13}/>} disabled={retrying} onClick={onRetry}>{t("retry")}</Button>}
+      </div>
+    </header>
+    <section className="detail-section detail-section--summary">
+      <h3>{t("downloadStatus")}</h3>
+      <dl className="property-grid">
+        <div><dt>{t("status")}</dt><dd className={failed ? "error" : "success"}>{label}</dd></div>
+        <div><dt>{t("quantization")}</dt><dd>{pending.quantization}</dd></div>
+        <div><dt>{t("progress")}</dt><dd>{pending.progress}%</dd></div>
+      </dl>
+      {!failed && <div className="detail-progress" aria-hidden="true"><i style={{ width: `${Math.max(3, Math.min(100, pending.progress))}%` }}/></div>}
+      {failed && pending.error && <p className="validation-error">{pending.error}</p>}
+    </section>
+  </>;
 }
 
-function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, activatePending }: {
+function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, onDelete, activatePending }: {
   model: ModelPackage;
   runtimeAvailable: boolean;
   onActivate: (id: string) => void;
   onUnload: (id: string) => void;
+  onDelete: (id: string) => void;
   activatePending: boolean;
 }) {
   const { t } = useI18n();
@@ -153,7 +221,10 @@ function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, activatePe
       <div className="header-actions">
         {model.active
           ? <Button variant="danger" onClick={() => onUnload(model.id)}>{t("unload")}</Button>
-          : <Button variant="primary" disabled={!model.valid || !runtimeAvailable || activatePending} onClick={() => onActivate(model.id)}>{t("activate")}</Button>}
+          : <>
+              <Button variant="primary" disabled={!model.valid || !runtimeAvailable || activatePending} onClick={() => onActivate(model.id)}>{t("activate")}</Button>
+              <Button variant="danger" icon={<Trash2 size={13}/>} onClick={() => onDelete(model.id)}>{t("deleteModel")}</Button>
+            </>}
       </div>
     </header>
     <section className="detail-section detail-section--summary">
@@ -170,4 +241,10 @@ function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, activatePe
       {model.valid ? <div className="validation-ok"><CheckCircle2 size={16}/>{t("valid")}</div> : model.errors.map(error => <p className="validation-error" key={error}>{error}</p>)}
     </section>
   </>;
+}
+
+function repoShortName(repo: string) {
+  const cleaned = repo.trim().replace(/\/+$/, "");
+  const parts = cleaned.split("/");
+  return parts[parts.length - 1] || cleaned;
 }

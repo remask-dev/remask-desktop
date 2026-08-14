@@ -7,8 +7,8 @@ core_dir="$workspace_dir/remask-core"
 tauri_dir="$desktop_dir/src-tauri"
 target_triple="${TARGET_TRIPLE:-$(rustc -vV | awk '/^host:/ { print $2 }')}"
 runtime_library="${REMASK_ONNXRUNTIME_LIBRARY:-}"
-model_ids="${REMASK_MODEL_IDS:-openai-privacy-filter-q4}"
-active_model_id="${REMASK_ACTIVE_MODEL:-openai-privacy-filter-q4}"
+model_ids="${REMASK_MODEL_IDS:-openai-privacy-filter-q4f16}"
+active_model_id="${REMASK_ACTIVE_MODEL:-openai-privacy-filter-q4f16}"
 runtime_target_dir="$tauri_dir/resources/onnxruntime"
 models_stage_dir="$tauri_dir/resources/models.stage"
 
@@ -84,8 +84,58 @@ fi
 printf '{\n  "active_model": "%s"\n}\n' "$active_model_id" > "$tauri_dir/resources/model-bundle.json"
 rm -rf "$tauri_dir/resources/models"
 mv "$models_stage_dir" "$tauri_dir/resources/models"
-rm -f "$runtime_target_dir/$runtime_filename"
-cp "$runtime_library" "$runtime_target_dir/$runtime_filename"
+runtime_source_dir="$(cd "$(dirname "$runtime_library")" && pwd)"
+runtime_source_path="$runtime_source_dir/$(basename "$runtime_library")"
+runtime_target_path="$(cd "$runtime_target_dir" && pwd)/$runtime_filename"
+# Remove provider files from an earlier staging run before copying the new
+# runtime set; otherwise switching from a GPU runtime to a CPU runtime could
+# leave stale providers in the application bundle.
+shopt -s nullglob
+stale_provider_libraries=(
+  "$runtime_target_dir"/libonnxruntime_providers_*
+  "$runtime_target_dir"/onnxruntime_providers_*.dll
+  "$runtime_target_dir"/DirectML.dll
+)
+shopt -u nullglob
+for stale_provider_library in "${stale_provider_libraries[@]}"; do
+  rm -f "$stale_provider_library"
+done
+if [[ "$runtime_source_path" != "$runtime_target_path" ]]; then
+  rm -f "$runtime_target_path"
+  cp "$runtime_source_path" "$runtime_target_path"
+fi
+# GPU execution providers may be shipped as companion libraries beside the
+# main ONNX Runtime library. Stage them with the sidecar so providers can be
+# loaded at runtime (CUDA/ROCm/OpenVINO on Linux, CUDA/DirectML on Windows).
+provider_libraries=()
+case "$runtime_filename" in
+  libonnxruntime.dylib)
+    shopt -s nullglob
+    provider_libraries=("$runtime_source_dir"/libonnxruntime_providers_*.dylib)
+    shopt -u nullglob
+    ;;
+  libonnxruntime.so)
+    shopt -s nullglob
+    provider_libraries=("$runtime_source_dir"/libonnxruntime_providers_*.so*)
+    shopt -u nullglob
+    ;;
+  onnxruntime.dll)
+    shopt -s nullglob
+    provider_libraries=("$runtime_source_dir"/onnxruntime_providers_*.dll "$runtime_source_dir"/DirectML.dll)
+    shopt -u nullglob
+    ;;
+  *)
+    provider_libraries=()
+    ;;
+esac
+if [[ -n "${provider_libraries[*]-}" ]]; then
+  for provider_library in "${provider_libraries[@]}"; do
+    cp -L "$provider_library" "$runtime_target_dir/$(basename "$provider_library")"
+  done
+fi
+# Downloaded runtimes may arrive read-only; tauri-build copies resources with
+# fs::copy, which cannot overwrite a read-only destination on a rebuild.
+chmod u+w "$runtime_target_dir/$runtime_filename"
 
 echo "staged remask-core-$target_triple"
 echo "staged runtime $runtime_filename"
