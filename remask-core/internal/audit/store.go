@@ -18,18 +18,35 @@ import (
 const timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 type Settings struct {
-	RecordRequestContent bool   `json:"record_request_content"`
-	RetentionDays        int    `json:"retention_days"`
-	HFBaseURL            string `json:"hf_base_url,omitempty"`
+	RecordRequestContent  bool   `json:"record_request_content"`
+	RetentionDays         int    `json:"retention_days"`
+	HFBaseURL             string `json:"hf_base_url,omitempty"`
+	MaxInferenceTokens    int    `json:"max_inference_tokens"`
+	InferenceProvider     string `json:"inference_provider"`
+	EntityCacheEnabled    bool   `json:"entity_cache_enabled"`
+	EntityCacheTTLSeconds int    `json:"entity_cache_ttl_seconds"`
 }
 
 func DefaultSettings() Settings {
-	return Settings{RecordRequestContent: true, RetentionDays: 30}
+	return Settings{RecordRequestContent: true, RetentionDays: 30, MaxInferenceTokens: 512, InferenceProvider: "cpu", EntityCacheEnabled: true, EntityCacheTTLSeconds: 300}
 }
 
 func (s Settings) Validate() error {
 	if s.RetentionDays < 1 || s.RetentionDays > 365 {
 		return errors.New("retention_days must be between 1 and 365")
+	}
+	if s.MaxInferenceTokens < 512 || s.MaxInferenceTokens > 4096 {
+		return errors.New("max_inference_tokens must be between 512 and 4096")
+	}
+	if s.EntityCacheTTLSeconds < 1 || s.EntityCacheTTLSeconds > 86400 {
+		return errors.New("entity_cache_ttl_seconds must be between 1 and 86400")
+	}
+	provider := strings.ToLower(strings.TrimSpace(s.InferenceProvider))
+	if provider == "" {
+		provider = "auto"
+	}
+	if provider != "auto" && provider != "cpu" && provider != "gpu" {
+		return errors.New("inference_provider must be auto, cpu, or gpu")
 	}
 	if strings.TrimSpace(s.HFBaseURL) != "" {
 		if !strings.HasPrefix(strings.TrimRight(s.HFBaseURL, "/"), "https://") && !strings.HasPrefix(strings.TrimRight(s.HFBaseURL, "/"), "http://") {
@@ -226,6 +243,9 @@ func (s *Store) Settings() Settings {
 }
 
 func (s *Store) Configure(settings Settings) error {
+	if settings.EntityCacheTTLSeconds == 0 {
+		settings.EntityCacheTTLSeconds = DefaultSettings().EntityCacheTTLSeconds
+	}
 	if err := settings.Validate(); err != nil {
 		return err
 	}
@@ -459,6 +479,18 @@ func (s *Store) loadSettings() error {
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return err
+	}
+	if settings.MaxInferenceTokens == 0 {
+		settings.MaxInferenceTokens = DefaultSettings().MaxInferenceTokens
+	}
+	if _, exists := raw["entity_cache_enabled"]; !exists {
+		settings.EntityCacheEnabled = DefaultSettings().EntityCacheEnabled
+	}
+	if _, exists := raw["entity_cache_ttl_seconds"]; !exists || settings.EntityCacheTTLSeconds == 0 {
+		settings.EntityCacheTTLSeconds = DefaultSettings().EntityCacheTTLSeconds
+	}
+	if strings.TrimSpace(settings.InferenceProvider) == "" {
+		settings.InferenceProvider = DefaultSettings().InferenceProvider
 	}
 	if err := settings.Validate(); err != nil {
 		return err

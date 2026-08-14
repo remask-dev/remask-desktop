@@ -1,4 +1,4 @@
-export interface RuntimeStatus { available: boolean; name: string }
+export interface RuntimeStatus { available: boolean; name: string; provider?: string; configured_provider?: string; provider_config_pending?: boolean; max_inference_tokens?: number; configured_max_inference_tokens?: number; inference_config_pending?: boolean }
 export interface VersionResponse { name: string; version: string; api_version: string; capabilities: string[]; model_runtime: RuntimeStatus }
 export interface Profile { id: string; name: string; operations: unknown[]; header_templates?: Record<string, string> }
 export interface Upstream { id: string; base_url: string; profile_id: string; credential_mode: "passthrough" | "managed"; api_key?: string; header_templates?: Record<string, string> }
@@ -11,7 +11,7 @@ export interface TokenUsage { input: number; output: number; total: number; cach
 export interface AuditLog { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; protection_mode?: "redacted" | "passthrough" | "disabled"; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; fields?: AuditField[]; error_code?: string }
 export interface DailyStat { date: string; requests: number; entities: number }
 export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[]; token_input: number; token_output: number; token_total: number; token_cached: number; tokens_per_minute: number }
-export interface AuditSettings { record_request_content: boolean; retention_days: number; hf_base_url?: string }
+export interface AuditSettings { record_request_content: boolean; retention_days: number; hf_base_url?: string; max_inference_tokens: number; inference_provider: "auto" | "cpu" | "gpu"; entity_cache_enabled: boolean; entity_cache_ttl_seconds: number }
 export interface ModelDownloadRequest { repo: string; revision?: string; variant?: string; id?: string; name?: string; base_url?: string }
 export interface ModelCatalogEntry { id: string; name: string; project_url: string; repo: string; revision: string; variant: string }
 export interface PIIEntity { type: string; replacement: string; confidence: number; sources: string[] }

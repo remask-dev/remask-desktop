@@ -25,16 +25,41 @@ type Manager struct {
 	detector   *pii.DynamicDetector
 	operations *operation.Store
 
-	mu       sync.RWMutex
-	packages map[string]Package
-	active   *managedSession
+	mu                 sync.RWMutex
+	packages           map[string]Package
+	active             *managedSession
+	maxInferenceTokens int
 }
 
 func NewManager(root string, runtime Runtime, detector *pii.DynamicDetector, operations *operation.Store) *Manager {
 	if runtime == nil {
 		runtime = UnavailableRuntime{}
 	}
-	return &Manager{root: root, runtime: runtime, detector: detector, operations: operations, packages: make(map[string]Package)}
+	return &Manager{root: root, runtime: runtime, detector: detector, operations: operations, packages: make(map[string]Package), maxInferenceTokens: MaxInferenceTokens}
+}
+
+// SetMaxInferenceTokens changes the safety limit used by subsequently loaded
+// model sessions. The model package's own manifest remains unchanged.
+func (m *Manager) SetMaxInferenceTokens(tokens int) {
+	if tokens < 1 {
+		tokens = MaxInferenceTokens
+	}
+	if tokens > MaxInferenceTokens {
+		tokens = MaxInferenceTokens
+	}
+	m.mu.Lock()
+	m.maxInferenceTokens = tokens
+	m.mu.Unlock()
+}
+
+// SetProvider changes the execution provider used by subsequently loaded
+// sessions. Existing sessions keep their current provider until reloaded.
+func (m *Manager) SetProvider(provider string) error {
+	configurable, ok := m.runtime.(interface{ SetProvider(string) error })
+	if !ok {
+		return nil
+	}
+	return configurable.SetProvider(provider)
 }
 
 func (m *Manager) Root() string { return m.root }
@@ -117,7 +142,32 @@ func (m *Manager) Active() (Metadata, bool) {
 }
 
 func (m *Manager) RuntimeStatus() map[string]any {
-	return map[string]any{"name": m.runtime.Name(), "available": m.runtime.Available()}
+	status := map[string]any{"name": m.runtime.Name(), "available": m.runtime.Available()}
+	m.mu.RLock()
+	configuredMaxTokens := m.maxInferenceTokens
+	active := m.active
+	m.mu.RUnlock()
+	status["max_inference_tokens"] = configuredMaxTokens
+	if active != nil && active.MaxInferenceTokens() > 0 {
+		status["max_inference_tokens"] = active.MaxInferenceTokens()
+		if active.MaxInferenceTokens() != configuredMaxTokens {
+			status["configured_max_inference_tokens"] = configuredMaxTokens
+			status["inference_config_pending"] = true
+		}
+	}
+	if provider, ok := m.runtime.(interface{ Provider() string }); ok {
+		status["provider"] = provider.Provider()
+	}
+	if configured, ok := m.runtime.(interface{ ConfiguredProvider() string }); ok {
+		status["configured_provider"] = configured.ConfiguredProvider()
+		if active == nil {
+			status["provider"] = configured.ConfiguredProvider()
+		}
+		if activeProvider, activeOK := m.runtime.(interface{ ActiveProvider() string }); activeOK && active != nil && activeProvider.ActiveProvider() != "" && activeProvider.ActiveProvider() != configured.ConfiguredProvider() {
+			status["provider_config_pending"] = true
+		}
+	}
+	return status
 }
 
 func (m *Manager) Activate(id string) (operation.Operation, error) {
@@ -165,11 +215,24 @@ func (m *Manager) activate(ctx context.Context, operationID string, item Package
 }
 
 func (m *Manager) loadSession(ctx context.Context, item Package) (*managedSession, error) {
-	session, err := m.runtime.Load(ctx, item.Path, item.Manifest)
+	manifest := item.Manifest
+	m.mu.RLock()
+	maxInferenceTokens := m.maxInferenceTokens
+	m.mu.RUnlock()
+	if maxInferenceTokens < 1 || maxInferenceTokens > MaxInferenceTokens {
+		maxInferenceTokens = MaxInferenceTokens
+	}
+	if manifest.MaxTokens > maxInferenceTokens {
+		manifest.MaxTokens = maxInferenceTokens
+		if manifest.Stride >= manifest.MaxTokens {
+			manifest.Stride = maxInferenceTokens / 8
+		}
+	}
+	session, err := m.runtime.Load(ctx, item.Path, manifest)
 	if err != nil {
 		return nil, err
 	}
-	managed := newManagedSession(session)
+	managed := newManagedSessionWithLimit(session, manifest.MaxTokens)
 
 	selfTestText := item.Manifest.SelfTestText
 	if selfTestText == "" {
@@ -212,6 +275,35 @@ func (m *Manager) Unload() error {
 		return previous.Close()
 	}
 	return nil
+}
+
+// Delete removes a downloaded model package from the managed models directory.
+// The active model cannot be deleted; callers must unload it first.
+func (m *Manager) Delete(id string) error {
+	m.mu.RLock()
+	item, ok := m.packages[id]
+	active := m.active
+	m.mu.RUnlock()
+	if !ok {
+		return ErrNotFound
+	}
+	if active != nil && active.Metadata().ID == id {
+		return errors.New("cannot delete the active model; unload it first")
+	}
+	target, err := secureModelPath(m.root, id)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(target) == filepath.Clean(item.Path) {
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+		m.mu.Lock()
+		delete(m.packages, id)
+		m.mu.Unlock()
+		return nil
+	}
+	return errors.New("model directory does not match the managed models directory")
 }
 
 func validatePackage(packagePath string) Package {

@@ -44,33 +44,11 @@ type repoInfo struct {
 // Variant is optional: an empty variant downloads the repository default model
 // (model.onnx) instead of a quantized build.
 func Download(ctx context.Context, cfg Config) (string, error) {
-	if cfg.Root == "" || cfg.ID == "" || cfg.Repo == "" {
-		return "", errors.New("root, id, and repo are required")
+	normalized, err := normalizeConfig(cfg)
+	if err != nil {
+		return "", err
 	}
-	if parsed, err := url.Parse(cfg.Repo); err == nil && parsed.IsAbs() {
-		if parsed.Host == "" || parsed.Path == "" {
-			return "", errors.New("repo URL is invalid")
-		}
-		cfg.Repo = strings.Trim(parsed.Path, "/")
-		if strings.HasSuffix(cfg.Repo, ".git") {
-			cfg.Repo = strings.TrimSuffix(cfg.Repo, ".git")
-		}
-	}
-	if strings.ContainsAny(cfg.ID, `/\\`) || strings.ContainsAny(cfg.Variant, `/\\`) {
-		return "", errors.New("id and variant must not contain path separators")
-	}
-	if cfg.Revision == "" {
-		cfg.Revision = "main"
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://huggingface.co"
-	}
-	if cfg.Name == "" {
-		cfg.Name = cfg.ID
-	}
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Minute}
-	}
+	cfg = normalized
 	directory := filepath.Join(cfg.Root, cfg.ID)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err
@@ -156,6 +134,57 @@ func Download(ctx context.Context, cfg Config) (string, error) {
 	return directory, nil
 }
 
+// ValidateRepo resolves and checks a repository before any download starts: it
+// normalizes the config, lists the remote files, and confirms a supported ONNX
+// model and tokenizer are present. It does not download anything.
+func ValidateRepo(ctx context.Context, cfg Config) error {
+	normalized, err := normalizeConfig(cfg)
+	if err != nil {
+		return err
+	}
+	available, _, err := listRepoFiles(ctx, normalized)
+	if err != nil {
+		return fmt.Errorf("list repository files: %w", err)
+	}
+	if _, err := selectFiles(available, normalized.Variant); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeConfig applies shared defaults and validation for both Download and
+// ValidateRepo.
+func normalizeConfig(cfg Config) (Config, error) {
+	if cfg.Root == "" || cfg.ID == "" || cfg.Repo == "" {
+		return cfg, errors.New("root, id, and repo are required")
+	}
+	if parsed, err := url.Parse(cfg.Repo); err == nil && parsed.IsAbs() {
+		if parsed.Host == "" || parsed.Path == "" {
+			return cfg, errors.New("repo URL is invalid")
+		}
+		cfg.Repo = strings.Trim(parsed.Path, "/")
+		if strings.HasSuffix(cfg.Repo, ".git") {
+			cfg.Repo = strings.TrimSuffix(cfg.Repo, ".git")
+		}
+	}
+	if strings.ContainsAny(cfg.ID, `/\\`) || strings.ContainsAny(cfg.Variant, `/\\`) {
+		return cfg, errors.New("id and variant must not contain path separators")
+	}
+	if cfg.Revision == "" {
+		cfg.Revision = "main"
+	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = "https://huggingface.co"
+	}
+	if cfg.Name == "" {
+		cfg.Name = cfg.ID
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Minute}
+	}
+	return cfg, nil
+}
+
 func tokenizerTypeForFiles(files []remoteFile) string {
 	for _, file := range files {
 		if file.key == "tokenizer" && file.local == "tokenizer.json" {
@@ -166,7 +195,7 @@ func tokenizerTypeForFiles(files []remoteFile) string {
 }
 
 func modelSequenceConfig(path, tokenizerType string) (int, int) {
-	maxTokens := 512
+	maxTokens := model.MaxInferenceTokens
 	if data, err := os.ReadFile(path); err == nil {
 		var config struct {
 			MaxPositionEmbeddings int `json:"max_position_embeddings"`
@@ -311,7 +340,11 @@ func selectFiles(available map[string]bool, variant string) ([]remoteFile, error
 	}
 	files := []remoteFile{{key: "model", remote: modelRemote, local: "model.onnx"}}
 	if available[modelRemote+"_data"] {
-		files = append(files, remoteFile{key: "model_data", remote: modelRemote + "_data", local: "model.onnx_data"})
+		// External-data ONNX graphs store the data filename inside the graph
+		// protobuf. Preserve the remote basename so the runtime can resolve that
+		// reference without rewriting the binary graph.
+		dataLocal := filepath.Base(modelRemote) + "_data"
+		files = append(files, remoteFile{key: "model_data", remote: modelRemote + "_data", local: dataLocal})
 	}
 	// A repository may publish both files. vocab.txt is the native input for
 	// the Go WordPiece tokenizer; tokenizer.json is used for BPE/o200k models.

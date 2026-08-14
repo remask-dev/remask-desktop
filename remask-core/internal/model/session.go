@@ -8,19 +8,27 @@ import (
 )
 
 type managedSession struct {
-	session Session
-	mu      sync.Mutex
-	cond    *sync.Cond
-	active  int
-	closing bool
-	closed  bool
+	session   Session
+	maxTokens int
+	mu        sync.Mutex
+	cond      *sync.Cond
+	active    int
+	closing   bool
+	closed    bool
 }
 
 func newManagedSession(session Session) *managedSession {
+	return newManagedSessionWithLimit(session, 0)
+}
+
+func newManagedSessionWithLimit(session Session, maxTokens int) *managedSession {
 	managed := &managedSession{session: session}
+	managed.maxTokens = maxTokens
 	managed.cond = sync.NewCond(&managed.mu)
 	return managed
 }
+
+func (s *managedSession) MaxInferenceTokens() int { return s.maxTokens }
 
 func (s *managedSession) ID() string { return s.session.ID() }
 

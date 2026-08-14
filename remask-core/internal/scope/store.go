@@ -15,8 +15,6 @@ import (
 
 var ErrNotFound = errors.New("scope not found")
 
-const deviceKeyBytes = 32
-
 type Vault interface {
 	ID() string
 	TokenFor(entityType, original string) (string, error)
@@ -34,7 +32,6 @@ type memoryVault struct {
 	mu        sync.RWMutex
 	id        string
 	expiresAt time.Time
-	tokenKey  []byte
 	byValue   map[string]string
 	byToken   map[string]string
 }
@@ -52,7 +49,7 @@ func (v *memoryVault) TokenFor(entityType, original string) (string, error) {
 	}
 
 	for attempts := 0; attempts < 32; attempts++ {
-		suffix := deterministicSuffix(v.tokenKey, entityType, original, attempts)
+		suffix := deterministicSuffix(entityType, original, attempts)
 		token := fmt.Sprintf("<%s:%s>", maskIdentifier(entityType), suffix)
 		if strings.Contains(original, token) {
 			continue
@@ -97,22 +94,11 @@ func (v *memoryVault) Resolve(token string) (string, bool) {
 type MemoryStore struct {
 	mu         sync.RWMutex
 	defaultTTL time.Duration
-	tokenKey   []byte
 	vaults     map[string]*memoryVault
 }
 
-func NewMemoryStore(defaultTTL time.Duration, deviceKey []byte) (*MemoryStore, error) {
-	if len(deviceKey) == 0 {
-		deviceKey = make([]byte, deviceKeyBytes)
-		if _, err := rand.Read(deviceKey); err != nil {
-			return nil, fmt.Errorf("generate device key: %w", err)
-		}
-	}
-	if len(deviceKey) < deviceKeyBytes {
-		return nil, fmt.Errorf("device key must contain at least %d bytes", deviceKeyBytes)
-	}
-	keyCopy := append([]byte(nil), deviceKey...)
-	return &MemoryStore{defaultTTL: defaultTTL, tokenKey: keyCopy, vaults: make(map[string]*memoryVault)}, nil
+func NewMemoryStore(defaultTTL time.Duration) (*MemoryStore, error) {
+	return &MemoryStore{defaultTTL: defaultTTL, vaults: make(map[string]*memoryVault)}, nil
 }
 
 func (s *MemoryStore) Create(ctx context.Context, ttl time.Duration) (Vault, error) {
@@ -129,7 +115,6 @@ func (s *MemoryStore) Create(ctx context.Context, ttl time.Duration) (Vault, err
 	vault := &memoryVault{
 		id:        "scp_" + strings.ToLower(idPart),
 		expiresAt: time.Now().UTC().Add(ttl),
-		tokenKey:  s.tokenKey,
 		byValue:   make(map[string]string),
 		byToken:   make(map[string]string),
 	}
@@ -174,8 +159,10 @@ func randomHex(bytes int) (string, error) {
 	return strings.ToUpper(hex.EncodeToString(buffer)), nil
 }
 
-func deterministicSuffix(key []byte, entityType, original string, attempt int) string {
-	mac := hmac.New(sha256.New, key)
+func deterministicSuffix(entityType, original string, attempt int) string {
+	// Keep the original HMAC input and domain prefix; only the device-derived
+	// key has been removed so suffixes are independent of device identity.
+	mac := hmac.New(sha256.New, nil)
 	_, _ = mac.Write([]byte("remask-token-v1\x00"))
 	_, _ = mac.Write([]byte(entityType))
 	_, _ = mac.Write([]byte{0})

@@ -34,6 +34,8 @@ npm run tauri build
 
 Set `TARGET_TRIPLE` when cross-compiling. By default the staging script bundles `openai-privacy-filter-q4`. Override this through `REMASK_MODEL_IDS` and `REMASK_ACTIVE_MODEL`. The shell passes `--models-dir` and `--onnxruntime-lib`, then activates the selected bundled model before serving requests.
 
+The Core selects the platform GPU provider automatically. Override it with `REMASK_ONNX_PROVIDER` (`coreml`, `directml`, `cuda`, `tensorrt`, `rocm`, `openvino`, or `cpu`) and `REMASK_ONNX_DEVICE` when launching the desktop app or sidecar. The runtime bundle must include provider companion libraries for CUDA/ROCm/OpenVINO/DirectML; `stage:core` copies these files from the same directory as `REMASK_ONNXRUNTIME_LIBRARY`.
+
 The bundled OpenAI package adds roughly 1 GB before installer compression. Additional models can be downloaded from the Models view after installation.
 
 ```bash
@@ -42,7 +44,7 @@ npm run stage:core
 
 Development remains usable without staged resources and falls back to deterministic rules when a separately launched core was built without ONNX support.
 
-The desktop client and standalone Core share `~/.remask`. Core derives its deterministic label key in memory from the application-scoped machine ID, so the same entity keeps the same four-character pseudorandom tag across launches without persisting a device key; request-local PII mappings are not persisted. Reinstalling the OS or changing the system machine ID changes these labels.
+The desktop client and standalone Core share `~/.remask`. Core uses the fixed HMAC input prefix and does not read or persist a machine identifier. The same entity keeps the same four-character pseudorandom tag across requests, restarts, and devices; request-local PII mappings are not persisted.
 
 The proxy supports service-ID URLs (`/proxy/{service-id}/...`), configured-domain URLs (`/proxy/{upstream-domain}/...`), and direct protocol paths (`/*`). When multiple services match a domain or direct protocol path, Remask selects the first service by service ID.
 

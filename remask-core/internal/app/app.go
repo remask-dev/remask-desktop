@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,25 +34,56 @@ func NewWithHTTPClient(logger *log.Logger, httpClient *http.Client) (*App, error
 }
 
 type Options struct {
-	HTTPClient  *http.Client
-	ModelsDir   string
-	Runtime     model.Runtime
-	ActiveModel string
-	DeviceKey   []byte
-	DataDir     string
+	HTTPClient             *http.Client
+	ModelsDir              string
+	Runtime                model.Runtime
+	ActiveModel            string
+	DataDir                string
+	EntityCacheBackend     string
+	EntityCacheRedisURL    string
+	EntityCacheRedisPrefix string
 }
 
 func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
-	store, err := scope.NewMemoryStore(15*time.Minute, options.DeviceKey)
+	// Entity label suffixes are deterministic from the entity itself and do not
+	// depend on a machine or device identifier.
+	store, err := scope.NewMemoryStore(15 * time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("initialize entity store: %w", err)
+	}
+	audits, err := audit.NewStore(options.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("initialize audit store: %w", err)
 	}
 	rules, err := pii.NewRuleDetectorWithDataDir(options.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("initialize policy rules: %w", err)
 	}
 	detector := pii.NewDynamicDetector(rules)
-	service := pii.NewService(pii.NewPolicyDetector(detector, rules), store)
+	settings := audits.Settings()
+	cacheBackend := options.EntityCacheBackend
+	if cacheBackend == "" {
+		cacheBackend = os.Getenv("REMASK_ENTITY_CACHE_BACKEND")
+	}
+	redisURL := options.EntityCacheRedisURL
+	if redisURL == "" {
+		redisURL = os.Getenv("REMASK_ENTITY_CACHE_REDIS_URL")
+	}
+	redisPrefix := options.EntityCacheRedisPrefix
+	if redisPrefix == "" {
+		redisPrefix = os.Getenv("REMASK_ENTITY_CACHE_REDIS_PREFIX")
+	}
+	service, err := pii.NewServiceWithCache(pii.NewPolicyDetector(detector, rules), store, pii.EntityCacheConfig{
+		Enabled:   settings.EntityCacheEnabled,
+		TTL:       time.Duration(settings.EntityCacheTTLSeconds) * time.Second,
+		Backend:   cacheBackend,
+		RedisURL:  redisURL,
+		KeyPrefix: redisPrefix,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize entity cache: %w", err)
+	}
+	service.SetLogger(logger)
 	operations := operation.NewStore()
 	modelsDir := options.ModelsDir
 	if modelsDir == "" {
@@ -61,12 +93,20 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 		modelsDir = "models"
 	}
 	models := model.NewManager(modelsDir, options.Runtime, detector, operations)
+	models.SetMaxInferenceTokens(audits.Settings().MaxInferenceTokens)
+	if err := models.SetProvider(audits.Settings().InferenceProvider); err != nil {
+		return nil, fmt.Errorf("configure model provider: %w", err)
+	}
 	if options.ActiveModel != "" {
 		if _, err := models.Scan(context.Background()); err != nil {
 			return nil, fmt.Errorf("scan models: %w", err)
 		}
 		if err := models.ActivateSync(context.Background(), options.ActiveModel); err != nil {
-			return nil, fmt.Errorf("activate model %q: %w", options.ActiveModel, err)
+			if errors.Is(err, model.ErrNotFound) {
+				logger.Printf("active model is not installed; continuing with rules only model=%q", options.ActiveModel)
+			} else {
+				return nil, fmt.Errorf("activate model %q: %w", options.ActiveModel, err)
+			}
 		}
 	}
 
@@ -74,10 +114,6 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	upstreams, err := upstream.NewRegistry(options.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("initialize upstream registry: %w", err)
-	}
-	audits, err := audit.NewStore(options.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("initialize audit store: %w", err)
 	}
 	proxy := gateway.New(logger, upstreams, profiles, service, audits, options.HTTPClient, rules)
 

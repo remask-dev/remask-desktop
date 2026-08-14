@@ -14,6 +14,18 @@ go run ./cmd/remask-core --addr 127.0.0.1:17680 --proxy-addr 127.0.0.1:17681
 
 Upstream 配置、规则、审计设置和安全日志默认统一存放在用户 Home 的 `~/.remask` 隐藏目录，可通过 `--data-dir` 或 `REMASK_DATA_DIR` 指定。持久化数据统一使用 SQLite 数据库 `remask.db`，当前用于请求日志，后续可扩展其他本地数据；审计日志不会记录 Header、URL 查询参数或实体原文，只保存首尾保留的安全打码预览（如 `138***000`）、实际发送给上游的标签文本、实体标识与模型置信度。正则规则为确定性匹配，命中置信度固定为 `1.0`。普通规则使用 `<MASK_大写规则ID:四位码>`，模型继续使用 `<实体类型:四位码>`；实体类型开关只控制模型输出，普通规则由各自开关控制。
 
+实体识别默认使用 `patrickmn/go-cache` 进程内缓存，按输入文本的 SHA-256 摘要保存识别结果；缓存值只保留实体类型、位置和置信度等结构信息，不保存实体原文，命中时根据当前输入恢复。缓存命中会续期，过期项由后台清理。可通过 `PUT /api/v1/settings` 的 `audit.entity_cache_enabled` 和 `audit.entity_cache_ttl_seconds` 配置开关与过期时间（默认开启、300 秒，允许 1–86400 秒）。内存缓存不会写入磁盘。
+
+缓存层通过统一接口隔离。多实例部署可直接切换到 Redis 6.2+：
+
+```bash
+REMASK_ENTITY_CACHE_BACKEND=redis \
+REMASK_ENTITY_CACHE_REDIS_URL=redis://127.0.0.1:6379/0 \
+./remask-core
+```
+
+可选的 `REMASK_ENTITY_CACHE_REDIS_PREFIX` 用于隔离环境，默认是 `remask:pii:entity:v1:`。Redis 后端使用 `GETEX` 原子完成读取和滑动续期；Redis 故障时缓存按 fail-open 处理，不会阻止本地脱敏检测。
+
 常用管理接口：
 
 ```text
@@ -28,7 +40,7 @@ PUT    /api/v1/upstreams/{id}
 DELETE /api/v1/upstreams/{id}
 ```
 
-Core 使用 `machineid.ProtectedID("remask")` 获取应用隔离的设备标识，并在进程内通过 SHA-256 派生 256-bit 标签密钥。Remask 不持久化原始 Machine ID 或派生密钥；`~/.remask` 只保存配置和安全审计日志。相同设备上的相同实体会在独立请求中得到相同的 4 位伪随机标签，请求内反向映射会在代理响应结束后删除；网关不会使用 AI 提供商的响应 ID 建立会话状态。系统重装或系统 Machine ID 变化后，标签会随之变化。每个请求适配方案还可以声明 API Key Header 模板，托管凭证只需填写 API Key，网关按模板生成鉴权 Header。
+Core 使用固定输入前缀的 HMAC 标签派生逻辑，不读取或持久化设备标识；相同实体会在独立请求、重启和不同设备上得到相同的 4 位伪随机标签。请求内反向映射会在代理响应结束后删除；网关不会使用 AI 提供商的响应 ID 建立会话状态。每个请求适配方案还可以声明 API Key Header 模板，托管凭证只需填写 API Key，网关按模板生成鉴权 Header。
 
 ## Test
 
@@ -86,6 +98,14 @@ go run ./cmd/remask-core \
   -active-model openai-privacy-filter-q4f16 \
   -onnxruntime-lib /absolute/path/to/onnxruntime.dylib
 ```
+
+ONNX Runtime 默认使用 `-onnx-provider auto`：macOS 优先 CoreML（Apple GPU/Neural Engine），Windows 优先 DirectML，Linux 优先 CUDA、ROCm 或 OpenVINO GPU；GPU provider 不可用时自动回退 CPU。也可以显式选择 provider 和 GPU 编号：
+
+```bash
+./remask-core -onnx-provider cuda -onnx-device 0
+```
+
+对应环境变量为 `REMASK_ONNX_PROVIDER` 和 `REMASK_ONNX_DEVICE`。显式指定 provider 时，如果动态库或驱动不支持该 provider，模型加载会返回错误；`auto` 模式会继续尝试其他 provider。GPU 版 ONNX Runtime 需要随包提供对应的 provider companion libraries 以及平台驱动/CUDA/ROCm/OpenVINO 运行库，单独替换 `onnxruntime.dll` 或 `libonnxruntime.so` 不足以启用 GPU。
 
 下载器使用的模型地址模板为：
 

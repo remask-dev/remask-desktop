@@ -10,11 +10,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/remask/remask-core/internal/app"
-	"github.com/remask/remask-core/internal/machinekey"
 	"github.com/remask/remask-core/internal/model"
 )
 
@@ -24,6 +24,8 @@ func main() {
 	modelsDir := flag.String("models-dir", "models", "managed model directory")
 	activeModel := flag.String("active-model", os.Getenv("REMASK_ACTIVE_MODEL"), "model ID to load before serving requests")
 	onnxRuntimeLibrary := flag.String("onnxruntime-lib", "", "path to the ONNX Runtime shared library")
+	onnxProvider := flag.String("onnx-provider", envOr("REMASK_ONNX_PROVIDER", "auto"), "ONNX execution provider: auto, cpu, coreml, cuda, directml, tensorrt, rocm, or openvino")
+	onnxDevice := flag.Int("onnx-device", envInt("REMASK_ONNX_DEVICE", 0), "GPU device index for the ONNX execution provider")
 	dataDir := flag.String("data-dir", os.Getenv("REMASK_DATA_DIR"), "directory for settings, upstreams, and masked audit logs")
 	flag.Parse()
 
@@ -45,22 +47,17 @@ func main() {
 		*onnxRuntimeLibrary = discoverRuntimeLibrary()
 	}
 	if *activeModel == "" {
-		const defaultModel = "openai-privacy-filter-q4"
+		const defaultModel = "openai-privacy-filter-q4f16"
 		if _, err := os.Stat(filepath.Join(*modelsDir, defaultModel, "manifest.json")); err == nil {
 			*activeModel = defaultModel
 		}
 	}
-	key, err := machinekey.Derive()
-	if err != nil {
-		logger.Printf("derive machine key: %v", err)
-		os.Exit(1)
-	}
-	runtime, err := model.NewRuntime(*onnxRuntimeLibrary)
+	runtime, err := model.NewRuntimeWithOptions(*onnxRuntimeLibrary, model.RuntimeOptions{Provider: *onnxProvider, DeviceID: *onnxDevice})
 	if err != nil {
 		logger.Printf("initialize model runtime: %v", err)
 		os.Exit(1)
 	}
-	application, err := app.NewWithOptions(logger, app.Options{ModelsDir: *modelsDir, Runtime: runtime, ActiveModel: *activeModel, DeviceKey: key, DataDir: *dataDir})
+	application, err := app.NewWithOptions(logger, app.Options{ModelsDir: *modelsDir, Runtime: runtime, ActiveModel: *activeModel, DataDir: *dataDir})
 	if err != nil {
 		logger.Printf("initialize application: %v", err)
 		os.Exit(1)
@@ -102,6 +99,25 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func discoverRuntimeLibrary() string {

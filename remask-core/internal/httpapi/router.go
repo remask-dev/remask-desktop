@@ -68,6 +68,7 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 	mux.HandleFunc("GET /api/v1/models/{model_id}", router.getModel)
 	mux.HandleFunc("POST /api/v1/models/{model_id}/activate", router.activateModel)
 	mux.HandleFunc("POST /api/v1/models/{model_id}/unload", router.unloadModel)
+	mux.HandleFunc("DELETE /api/v1/models/{model_id}", router.deleteModel)
 	mux.HandleFunc("GET /api/v1/operations", router.listOperations)
 	mux.HandleFunc("GET /api/v1/operations/{operation_id}", router.getOperation)
 	mux.HandleFunc("DELETE /api/v1/operations/{operation_id}", router.cancelOperation)
@@ -93,6 +94,9 @@ func (r *Router) putPolicy(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "POLICY_INVALID", err.Error())
 		return
 	}
+	// Entity policy changes alter detector output, so cached results must not
+	// survive the update.
+	r.pii.ClearEntityCache()
 	writeJSON(w, http.StatusOK, r.rules.Policy())
 }
 
@@ -113,7 +117,7 @@ func (r *Router) ready(w http.ResponseWriter, _ *http.Request) {
 func (r *Router) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": "remask-core", "version": "0.1.0-dev", "api_version": "v1",
-		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
+		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
 		"model_runtime": r.models.RuntimeStatus(),
 	})
 }
@@ -309,12 +313,50 @@ type settingsRequest struct {
 	Models *struct {
 		HFBaseURL string `json:"hf_base_url"`
 	} `json:"models"`
+	entityCacheEnabledSet    bool
+	entityCacheTTLSecondsSet bool
+}
+
+// UnmarshalJSON tracks the presence of the cache fields so older desktop
+// clients can update unrelated settings without accidentally disabling the
+// newly introduced default-on cache.
+func (r *settingsRequest) UnmarshalJSON(data []byte) error {
+	type wire struct {
+		Audit  json.RawMessage `json:"audit"`
+		Models *struct {
+			HFBaseURL string `json:"hf_base_url"`
+		} `json:"models"`
+	}
+	var value wire
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if len(value.Audit) > 0 && string(value.Audit) != "null" {
+		if err := json.Unmarshal(value.Audit, &r.Audit); err != nil {
+			return err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(value.Audit, &fields); err != nil {
+			return err
+		}
+		_, r.entityCacheEnabledSet = fields["entity_cache_enabled"]
+		_, r.entityCacheTTLSecondsSet = fields["entity_cache_ttl_seconds"]
+	}
+	r.Models = value.Models
+	return nil
 }
 
 func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
 	var input settingsRequest
 	if !decodeJSON(w, request, &input) {
 		return
+	}
+	current := r.audits.Settings()
+	if !input.entityCacheEnabledSet {
+		input.Audit.EntityCacheEnabled = current.EntityCacheEnabled
+	}
+	if !input.entityCacheTTLSecondsSet {
+		input.Audit.EntityCacheTTLSeconds = current.EntityCacheTTLSeconds
 	}
 	if input.Models != nil {
 		input.Audit.HFBaseURL = strings.TrimSpace(input.Models.HFBaseURL)
@@ -323,6 +365,18 @@ func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "SETTINGS_INVALID", err.Error())
 		return
 	}
+	if err := r.pii.ConfigureEntityCache(pii.EntityCacheConfig{
+		Enabled: input.Audit.EntityCacheEnabled,
+		TTL:     time.Duration(input.Audit.EntityCacheTTLSeconds) * time.Second,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "SETTINGS_INVALID", err.Error())
+		return
+	}
+	if err := r.models.SetProvider(input.Audit.InferenceProvider); err != nil {
+		writeError(w, http.StatusBadRequest, "SETTINGS_INVALID", err.Error())
+		return
+	}
+	r.models.SetMaxInferenceTokens(input.Audit.MaxInferenceTokens)
 	r.getSettings(w, request)
 }
 
@@ -368,6 +422,13 @@ func (r *Router) downloadModel(w http.ResponseWriter, request *http.Request) {
 	}
 	if input.BaseURL == "" {
 		input.BaseURL = "https://huggingface.co"
+	}
+	// Resolve and validate the repository before enqueueing the download, so a
+	// successful response means the model information was parsed and the model
+	// can be shown in the list immediately.
+	if err := modeldownload.ValidateRepo(request.Context(), modeldownload.Config{Root: r.models.Root(), ID: input.ID, Repo: input.Repo, Revision: input.Revision, Variant: input.Variant, BaseURL: input.BaseURL}); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "MODEL_REPO_INVALID", err.Error())
+		return
 	}
 	op, ctx := r.operations.Create("model.download")
 	go func() {
@@ -443,6 +504,9 @@ func (r *Router) activeModel(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Router) activateModel(w http.ResponseWriter, request *http.Request) {
+	// A model swap changes detection output. Clear before the asynchronous load
+	// starts so no result from the previous model can leak into the new one.
+	r.pii.ClearEntityCache()
 	op, err := r.models.Activate(request.PathValue("model_id"))
 	if err != nil {
 		status, code := http.StatusUnprocessableEntity, "MODEL_ACTIVATE_FAILED"
@@ -462,6 +526,19 @@ func (r *Router) unloadModel(w http.ResponseWriter, request *http.Request) {
 	}
 	if err := r.models.Unload(); err != nil {
 		writeError(w, http.StatusInternalServerError, "MODEL_UNLOAD_FAILED", err.Error())
+		return
+	}
+	r.pii.ClearEntityCache()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (r *Router) deleteModel(w http.ResponseWriter, request *http.Request) {
+	if err := r.models.Delete(request.PathValue("model_id")); err != nil {
+		status, code := http.StatusConflict, "MODEL_DELETE_FAILED"
+		if errors.Is(err, model.ErrNotFound) {
+			status, code = http.StatusNotFound, "MODEL_NOT_FOUND"
+		}
+		writeError(w, status, code, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

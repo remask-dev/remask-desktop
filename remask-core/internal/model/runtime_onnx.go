@@ -7,6 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -15,7 +19,11 @@ import (
 )
 
 type onnxRuntime struct {
-	version string
+	version        string
+	provider       string
+	deviceID       int
+	activeProvider string
+	providerMu     sync.RWMutex
 }
 
 type onnxSession struct {
@@ -30,8 +38,28 @@ type onnxSession struct {
 }
 
 func NewRuntime(libraryPath string) (Runtime, error) {
+	deviceID := 0
+	if value := os.Getenv("REMASK_ONNX_DEVICE"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			deviceID = parsed
+		}
+	}
+	return NewRuntimeWithOptions(libraryPath, RuntimeOptions{
+		Provider: os.Getenv("REMASK_ONNX_PROVIDER"),
+		DeviceID: deviceID,
+	})
+}
+
+func NewRuntimeWithOptions(libraryPath string, options RuntimeOptions) (Runtime, error) {
 	if libraryPath == "" {
 		libraryPath = os.Getenv("REMASK_ONNXRUNTIME_LIBRARY")
+	}
+	provider, err := normalizeProvider(options.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if options.DeviceID < 0 {
+		return nil, fmt.Errorf("ONNX device ID must be non-negative, got %d", options.DeviceID)
 	}
 	if libraryPath != "" {
 		ort.SetSharedLibraryPath(libraryPath)
@@ -40,11 +68,44 @@ func NewRuntime(libraryPath string) (Runtime, error) {
 		return nil, fmt.Errorf("initialize ONNX Runtime: %w", err)
 	}
 	_ = ort.DisableTelemetry()
-	return &onnxRuntime{version: ort.GetVersion()}, nil
+	return &onnxRuntime{version: ort.GetVersion(), provider: provider, deviceID: options.DeviceID}, nil
 }
 
 func (r *onnxRuntime) Name() string    { return "onnxruntime-" + r.version }
 func (r *onnxRuntime) Available() bool { return true }
+func (r *onnxRuntime) Provider() string {
+	r.providerMu.RLock()
+	defer r.providerMu.RUnlock()
+	if r.activeProvider != "" {
+		return r.activeProvider
+	}
+	return r.provider
+}
+
+func (r *onnxRuntime) ConfiguredProvider() string {
+	r.providerMu.RLock()
+	defer r.providerMu.RUnlock()
+	return r.provider
+}
+
+func (r *onnxRuntime) ActiveProvider() string {
+	r.providerMu.RLock()
+	defer r.providerMu.RUnlock()
+	return r.activeProvider
+}
+
+// SetProvider changes the provider used when the next model Session is loaded.
+// Existing Sessions keep their current execution provider until reloaded.
+func (r *onnxRuntime) SetProvider(value string) error {
+	provider, err := normalizeProvider(value)
+	if err != nil {
+		return err
+	}
+	r.providerMu.Lock()
+	r.provider = provider
+	r.providerMu.Unlock()
+	return nil
+}
 
 func (r *onnxRuntime) Load(ctx context.Context, packagePath string, manifest Manifest) (Session, error) {
 	if err := ctx.Err(); err != nil {
@@ -88,22 +149,167 @@ func (r *onnxRuntime) Load(ctx context.Context, packagePath string, manifest Man
 	if manifest.Inputs.TokenTypeIDs != "" {
 		inputNames = append(inputNames, manifest.Inputs.TokenTypeIDs)
 	}
-	sessionOptions, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, err
+	var session *ort.DynamicAdvancedSession
+	activeProvider := ""
+	var lastErr error
+	for _, provider := range r.providerCandidates() {
+		sessionOptions, optionsErr := ort.NewSessionOptions()
+		if optionsErr != nil {
+			lastErr = optionsErr
+			if r.provider != "auto" {
+				return nil, optionsErr
+			}
+			continue
+		}
+		if optionsErr = sessionOptions.SetGraphOptimizationLevel(ort.GraphOptimizationLevelEnableAll); optionsErr != nil {
+			sessionOptions.Destroy()
+			lastErr = optionsErr
+			if r.provider != "auto" {
+				return nil, optionsErr
+			}
+			continue
+		}
+		if provider != "cpu" {
+			if optionsErr = appendExecutionProvider(sessionOptions, provider, r.deviceID); optionsErr != nil {
+				sessionOptions.Destroy()
+				lastErr = fmt.Errorf("enable ONNX execution provider %q: %w", provider, optionsErr)
+				if r.provider != "auto" {
+					return nil, lastErr
+				}
+				continue
+			}
+		}
+		session, optionsErr = ort.NewDynamicAdvancedSession(modelPath, inputNames, []string{manifest.Outputs.Logits}, sessionOptions)
+		sessionOptions.Destroy()
+		if optionsErr == nil {
+			activeProvider = provider
+			break
+		}
+		lastErr = fmt.Errorf("create ONNX session with %s: %w", provider, optionsErr)
+		if r.provider != "auto" {
+			return nil, lastErr
+		}
 	}
-	defer sessionOptions.Destroy()
-	if err := sessionOptions.SetGraphOptimizationLevel(ort.GraphOptimizationLevelEnableAll); err != nil {
-		return nil, err
+	if session == nil {
+		if lastErr == nil {
+			lastErr = errors.New("no ONNX execution provider could create a session")
+		}
+		return nil, lastErr
 	}
-	session, err := ort.NewDynamicAdvancedSession(modelPath, inputNames, []string{manifest.Outputs.Logits}, sessionOptions)
-	if err != nil {
-		return nil, fmt.Errorf("create ONNX session: %w", err)
-	}
+	r.providerMu.Lock()
+	r.activeProvider = activeProvider
+	r.providerMu.Unlock()
 	return &onnxSession{
-		metadata: Metadata{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Runtime: r.Name(), Quantization: manifest.Quantization},
+		metadata: Metadata{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Runtime: r.Name() + "-" + activeProvider, Quantization: manifest.Quantization},
 		manifest: manifest, tokenizer: tokenizer, labels: labels, session: session,
 	}, nil
+}
+
+func normalizeProvider(value string) (string, error) {
+	provider := strings.ToLower(strings.TrimSpace(value))
+	if provider == "" {
+		provider = "auto"
+	}
+	aliases := map[string]string{
+		"dml":   "directml",
+		"apple": "coreml",
+		"trt":   "tensorrt",
+		"rocm":  "rocm",
+	}
+	if alias, ok := aliases[provider]; ok {
+		provider = alias
+	}
+	supported := map[string]bool{
+		"auto": true, "cpu": true, "gpu": true, "cuda": true, "coreml": true,
+		"directml": true, "tensorrt": true, "rocm": true, "openvino": true,
+	}
+	if !supported[provider] {
+		return "", fmt.Errorf("unsupported ONNX execution provider %q (use auto, cpu, cuda, coreml, directml, tensorrt, rocm, or openvino)", value)
+	}
+	return provider, nil
+}
+
+func (r *onnxRuntime) providerCandidates() []string {
+	if r.provider != "auto" && r.provider != "gpu" {
+		return []string{r.provider}
+	}
+	gpuOnly := r.provider == "gpu"
+	switch runtime.GOOS {
+	case "darwin":
+		if gpuOnly {
+			return []string{"coreml"}
+		}
+		return []string{"coreml", "cpu"}
+	case "windows":
+		if gpuOnly {
+			return []string{"directml", "cuda", "tensorrt"}
+		}
+		return []string{"directml", "cuda", "tensorrt", "cpu"}
+	case "linux":
+		if gpuOnly {
+			return []string{"cuda", "tensorrt", "rocm", "openvino"}
+		}
+		return []string{"cuda", "tensorrt", "rocm", "openvino", "cpu"}
+	default:
+		if gpuOnly {
+			return []string{}
+		}
+		return []string{"cpu"}
+	}
+}
+
+func appendExecutionProvider(options *ort.SessionOptions, provider string, deviceID int) error {
+	switch provider {
+	case "coreml":
+		cacheDirectory := os.Getenv("REMASK_ONNX_COREML_CACHE_DIR")
+		if cacheDirectory == "" {
+			cacheDirectory = filepath.Join(os.TempDir(), "remask-coreml")
+		}
+		if err := os.MkdirAll(cacheDirectory, 0o700); err != nil {
+			return fmt.Errorf("create CoreML model cache directory: %w", err)
+		}
+		return options.AppendExecutionProviderCoreMLV2(map[string]string{
+			"MLComputeUnits":           "ALL",
+			"RequireStaticInputShapes": "0",
+			"ModelCacheDirectory":      cacheDirectory,
+		})
+	case "directml":
+		// DirectML requires sequential graph execution. Disabling the memory
+		// pattern also avoids reusing CPU-side buffers across dynamic shapes.
+		if err := options.SetExecutionMode(ort.ExecutionModeSequential); err != nil {
+			return err
+		}
+		if err := options.SetMemPattern(false); err != nil {
+			return err
+		}
+		return options.AppendExecutionProviderDirectML(deviceID)
+	case "cuda":
+		cudaOptions, err := ort.NewCUDAProviderOptions()
+		if err != nil {
+			return err
+		}
+		defer cudaOptions.Destroy()
+		if err := cudaOptions.Update(map[string]string{"device_id": strconv.Itoa(deviceID)}); err != nil {
+			return err
+		}
+		return options.AppendExecutionProviderCUDA(cudaOptions)
+	case "tensorrt":
+		tensorRTOptions, err := ort.NewTensorRTProviderOptions()
+		if err != nil {
+			return err
+		}
+		defer tensorRTOptions.Destroy()
+		if err := tensorRTOptions.Update(map[string]string{"device_id": strconv.Itoa(deviceID)}); err != nil {
+			return err
+		}
+		return options.AppendExecutionProviderTensorRT(tensorRTOptions)
+	case "rocm":
+		return options.AppendExecutionProvider("ROCM", map[string]string{"device_id": strconv.Itoa(deviceID)})
+	case "openvino":
+		return options.AppendExecutionProviderOpenVINO(map[string]string{"device_type": "GPU"})
+	default:
+		return fmt.Errorf("unsupported ONNX execution provider %q", provider)
+	}
 }
 
 func (s *onnxSession) ID() string         { return "model:" + s.metadata.ID }

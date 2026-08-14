@@ -15,6 +15,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-autostart = "2"
 tauri-plugin-shell = "2"
+
+# Patch tray-icon so the macOS menu-bar icon renders at the full 22pt bar
+# height instead of the crate's hardcoded 18pt (vendor/tray-icon).
+[patch.crates-io]
+tray-icon = { path = "vendor/tray-icon" }
 

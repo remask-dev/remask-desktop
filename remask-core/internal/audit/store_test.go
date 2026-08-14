@@ -80,6 +80,30 @@ func TestStoreKeepsMetadataWhenContentDisabled(t *testing.T) {
 	}
 }
 
+func TestEntityCacheSettingsDefaultOnAndPersisted(t *testing.T) {
+	directory := t.TempDir()
+	store, err := NewStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := store.Settings()
+	if !settings.EntityCacheEnabled || settings.EntityCacheTTLSeconds != 300 {
+		t.Fatalf("unexpected entity cache defaults: %#v", settings)
+	}
+	settings.EntityCacheEnabled = false
+	settings.EntityCacheTTLSeconds = 60
+	if err := store.Configure(settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := NewStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Settings(); got.EntityCacheEnabled || got.EntityCacheTTLSeconds != 60 {
+		t.Fatalf("entity cache settings were not persisted: %#v", got)
+	}
+}
+
 func TestStorePersistsCompleteAuditFieldContent(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

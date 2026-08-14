@@ -13,6 +13,13 @@ var (
 	ErrRuntimeUnavailable = errors.New("ONNX Runtime is not available in this build")
 )
 
+// MaxInferenceTokens bounds the amount of text passed to a local model in one
+// ONNX invocation. Some model configs advertise a very large context window
+// (for example 128K), but allocating tensors of that size is unsafe for a
+// desktop privacy filter and can exhaust system memory. Long input is still
+// processed through overlapping windows.
+const MaxInferenceTokens = 4096
+
 type FileSpec struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256,omitempty"`
@@ -95,4 +102,12 @@ type Runtime interface {
 	Name() string
 	Available() bool
 	Load(ctx context.Context, packagePath string, manifest Manifest) (Session, error)
+}
+
+// RuntimeOptions controls the ONNX Runtime execution provider. Provider
+// "auto" selects the best GPU provider for the current platform and falls
+// back to CPU when that provider is unavailable.
+type RuntimeOptions struct {
+	Provider string
+	DeviceID int
 }
