@@ -10,7 +10,8 @@ export interface AuditField { path: string; original_masked: string; redacted: s
 export interface TokenUsage { input: number; output: number; total: number; cached?: number }
 export interface AuditLog { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; protection_mode?: "redacted" | "passthrough" | "disabled"; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; fields?: AuditField[]; error_code?: string }
 export interface DailyStat { date: string; requests: number; entities: number }
-export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[]; token_input: number; token_output: number; token_total: number; token_cached: number; tokens_per_minute: number }
+export type AuditStatsRange = "today" | "yesterday" | "7d" | "30d";
+export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[]; token_input: number; token_output: number; token_total: number; token_cached: number; tokens_per_minute: number; granularity?: "hour" | "day" }
 export interface AuditSettings { record_request_content: boolean; retention_days: number; hf_base_url?: string; max_inference_tokens: number; inference_provider: "auto" | "cpu" | "gpu"; entity_cache_enabled: boolean; entity_cache_ttl_seconds: number }
 export interface ModelDownloadRequest { repo: string; revision?: string; variant?: string; id?: string; name?: string; base_url?: string }
 export interface ModelCatalogEntry { id: string; name: string; project_url: string; repo: string; revision: string; variant: string }

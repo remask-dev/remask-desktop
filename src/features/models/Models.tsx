@@ -16,7 +16,6 @@ type PendingDownload = {
   quantization: string;
   operationId: string;
   status: Operation["status"];
-  progress: number;
   error?: string;
   repo: string;
   variant?: string;
@@ -58,7 +57,7 @@ export function Models({ data }: { data: BootstrapData }) {
       setManual(false);
       setPending({
         modelId: result.model_id, name: repoShortName(variables.repo), quantization: variables.variant || "default",
-        operationId: result.operation_id, status: "running", progress: 5, repo: variables.repo, variant: variables.variant,
+        operationId: result.operation_id, status: "running", repo: variables.repo, variant: variables.variant,
       });
       try {
         await pollDownload(result.operation_id, result.model_id);
@@ -82,11 +81,11 @@ export function Models({ data }: { data: BootstrapData }) {
       }
       if (op.status === "failed") {
         // Keep the row so the user can inspect the error and retry from the detail pane.
-        setPending(prev => prev ? { ...prev, status: "failed", progress: 100, error: op.error } : prev);
+        setPending(prev => prev ? { ...prev, status: "failed", error: op.error } : prev);
         return;
       }
       if (op.status === "cancelled") { setPending(null); return; }
-      setPending(prev => prev ? { ...prev, status: op.status, progress: op.progress ?? prev.progress } : prev);
+      setPending(prev => prev ? { ...prev, status: op.status } : prev);
     }
     setPending(null);
   }
@@ -176,7 +175,7 @@ export function Models({ data }: { data: BootstrapData }) {
 function PendingDetail({ pending, retrying, onRetry }: { pending: PendingDownload; retrying: boolean; onRetry: () => void }) {
   const { t } = useI18n();
   const failed = pending.status === "failed";
-  const label = failed ? t("downloadFailed") : pending.progress >= 85 ? t("parsing") : t("downloading");
+  const label = failed ? t("downloadFailed") : t("downloading");
   return <>
     <header className="detail-header">
       <div>
@@ -193,9 +192,7 @@ function PendingDetail({ pending, retrying, onRetry }: { pending: PendingDownloa
       <dl className="property-grid">
         <div><dt>{t("status")}</dt><dd className={failed ? "error" : "success"}>{label}</dd></div>
         <div><dt>{t("quantization")}</dt><dd>{pending.quantization}</dd></div>
-        <div><dt>{t("progress")}</dt><dd>{pending.progress}%</dd></div>
       </dl>
-      {!failed && <div className="detail-progress" aria-hidden="true"><i style={{ width: `${Math.max(3, Math.min(100, pending.progress))}%` }}/></div>}
       {failed && pending.error && <p className="validation-error">{pending.error}</p>}
     </section>
   </>;
