@@ -139,6 +139,15 @@ func discoverRuntimeLibrary() string {
 		filepath.Join("..", "remask-desktop", "src-tauri", "resources", "onnxruntime", filename),
 		filepath.Join("src-tauri", "resources", "onnxruntime", filename),
 	}
+	// Packaged desktop builds keep the runtime under resources next to the
+	// executable. Resolve that location before falling back to the platform
+	// loader's default DLL search path, which may contain an incompatible ORT.
+	if executable, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executable)
+		candidates = append([]string{
+			filepath.Join(executableDir, "resources", "onnxruntime", filename),
+		}, candidates...)
+	}
 	for _, candidate := range candidates {
 		absolute, err := filepath.Abs(candidate)
 		if err == nil {

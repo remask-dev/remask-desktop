@@ -16,7 +16,12 @@ installGlobalClientLogging();
 writeClientLog("lifecycle", "Client started");
 
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: error => writeClientLog("query", error) }),
+  queryCache: new QueryCache({ onError: (error, query) => {
+    // An unavailable local Core is a normal lifecycle state. The version
+    // query is the liveness probe, so its failures should not flood logs.
+    if (query.queryKey[0] === "core" && query.queryKey[1] === "version") return;
+    writeClientLog("query", error);
+  } }),
   mutationCache: new MutationCache({ onError: error => writeClientLog("mutation", error) }),
   defaultOptions: {
     queries: { staleTime: 3_000, refetchOnWindowFocus: true, retry: 1, throwOnError: false },
