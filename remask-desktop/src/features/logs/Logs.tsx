@@ -52,11 +52,42 @@ function LogDetail({ item }: { item: AuditLog }) {
   const disabled = item.protection_mode === "disabled" || item.operation_id === "disabled";
   const usage = item.token_usage ?? { input: 0, output: 0, total: 0 };
   const protectionLabel = disabled ? t("protectionDisabled") : pass ? t("passthrough") : t("redacted");
-  return <><header className="detail-header"><div><span>{new Date(item.timestamp).toLocaleString(dateLocale)}</span><h2>{item.upstream_id}</h2><code>{item.method} {item.path}</code></div><Badge tone={pass ? "warning" : "success"}>{protectionLabel}</Badge></header><section className="detail-section detail-section--summary"><h3>{t("summary")}</h3><dl className="property-grid property-grid--three"><div><dt>{t("requestModel")}</dt><dd>{item.model || "—"}</dd></div><div><dt>{t("protocol")}</dt><dd>{item.profile_id}</dd></div><div><dt>{t("protection")}</dt><dd className={pass ? "warning" : "success"}>{protectionLabel}</dd></div><div><dt>{t("entityCount")}</dt><dd>{item.entity_count}</dd></div><div><dt>{t("duration")}</dt><dd>{item.duration_ms} ms</dd></div><div><dt>{t("traffic")}</dt><dd>{formatBytes(item.request_bytes)} → {formatBytes(item.response_bytes)}</dd></div><div><dt>{t("tokenUsage")}</dt><dd>{usage.input} + {usage.output} = {usage.total}{usage.cached ? ` · ${usage.cached} ${t("cachedTokens")}` : ""}</dd></div></dl></section>{item.debug && <DebugExchangeView item={item.debug}/>}<section className="detail-section"><h3>{t("fieldAudit")}</h3>{pass ? <div className="warning-callout"><ShieldAlert size={18}/><div><strong>{protectionLabel}</strong><p>{disabled ? t("disabledNote") : t("passthroughNote")}</p></div></div> : (item.fields ?? []).map((field) => { const entities = field.entities ?? []; return <details className="audit-field" key={field.path} open={entities.length > 0}><summary><code>{field.path}</code><span>{entities.length} {t("entities")}</span></summary><div><section><span>{t("originalMasked")}</span><pre>{field.original_masked}</pre></section><section><span>{t("sentToAI")}</span><pre className="entity-rich-text">{renderEntities(field.redacted, entities)}</pre></section></div></details>; })}</section></>;
+  return <>
+    <header className="detail-header">
+      <div><span>{new Date(item.timestamp).toLocaleString(dateLocale)}</span><h2>{item.upstream_id}</h2><code>{item.method} {item.path}</code></div>
+      <Badge tone={pass ? "warning" : "success"}>{protectionLabel}</Badge>
+    </header>
+    <section className="detail-section detail-section--summary">
+      <h3>{t("summary")}</h3>
+      <dl className="property-grid property-grid--three">
+        <div><dt>{t("requestModel")}</dt><dd>{item.model || "—"}</dd></div>
+        <div><dt>{t("protocol")}</dt><dd>{item.profile_id}</dd></div>
+        <div><dt>{t("protection")}</dt><dd className={pass ? "warning" : "success"}>{protectionLabel}</dd></div>
+        <div><dt>{t("entityCount")}</dt><dd>{item.entity_count}</dd></div>
+        <div><dt>{t("duration")}</dt><dd>{item.duration_ms} ms</dd></div>
+        <div><dt>{t("traffic")}</dt><dd>{formatBytes(item.request_bytes)} → {formatBytes(item.response_bytes)}</dd></div>
+        <div><dt>{t("tokenUsage")}</dt><dd>{usage.input} + {usage.output} = {usage.total}{usage.cached ? ` · ${usage.cached} ${t("cachedTokens")}` : ""}</dd></div>
+      </dl>
+    </section>
+    {item.debug && <DebugExchangeView item={item.debug}/>}
+    <section className="detail-section">
+      <h3>{t("fieldAudit")}</h3>
+      {pass ? <div className="warning-callout"><ShieldAlert size={18}/><div><strong>{protectionLabel}</strong><p>{disabled ? t("disabledNote") : t("passthroughNote")}</p></div></div> : (item.fields ?? []).map((field) => {
+        const entities = field.entities ?? [];
+        return <details className="audit-field" key={field.path} open={entities.length > 0}>
+          <summary><code>{field.path}</code><span>{entities.length} {t("entities")}</span></summary>
+          <div><section><span>{t("originalMasked")}</span><pre>{field.original_masked}</pre></section><section><span>{t("sentToAI")}</span><pre className="entity-rich-text">{renderEntities(field.redacted, entities)}</pre></section></div>
+        </details>;
+      })}
+    </section>
+  </>;
 }
 
 function DebugExchangeView({ item }: { item: NonNullable<AuditLog["debug"]> }) {
-  return <section className="detail-section debug-exchange"><h3>Debug</h3><div className="debug-exchange__grid"><DebugPart title={`${item.request.method} ${item.request.url}`} headers={item.request.headers} body={item.request.body}/><DebugPart title={`HTTP ${item.response.status}`} headers={item.response.headers} body={item.response.body}/></div></section>;
+  return <details className="detail-section debug-exchange debug-exchange--collapsible">
+    <summary>Debug</summary>
+    <div className="debug-exchange__body"><div className="debug-exchange__grid"><DebugPart title={`${item.request.method} ${item.request.url}`} headers={item.request.headers} body={item.request.body}/><DebugPart title={`HTTP ${item.response.status}`} headers={item.response.headers} body={item.response.body}/></div></div>
+  </details>;
 }
 
 function DebugPart({ title, headers, body }: { title: string; headers?: Record<string, string[]>; body?: string }) {

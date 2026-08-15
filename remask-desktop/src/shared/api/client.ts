@@ -111,6 +111,7 @@ function normalizeModel(value: Record<string, unknown>): ModelPackage {
     id: text(value.id),
     valid: boolean(value.valid),
     active: boolean(value.active),
+    built_in: boolean(value.built_in),
     manifest: normalizeManifest(value.manifest),
     errors: stringList(value.errors),
   };

@@ -99,7 +99,8 @@ export function useOverviewData(range: AuditStatsRange) {
   const stats = useQuery({ queryKey: queryKeys.stats(range), queryFn: () => coreApi.stats(range), enabled: online, refetchInterval: online ? 15_000 : false, initialData: emptyStats, initialDataUpdatedAt: 0 });
   const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online, initialData: emptyPolicy, initialDataUpdatedAt: 0 });
   const activeModel = useQuery({ queryKey: queryKeys.activeModel, queryFn: coreApi.activeModel, enabled: online, initialData: null, initialDataUpdatedAt: 0 });
-  return combineQueries({ stats, policy, activeModel });
+  const upstreams = useQuery({ queryKey: queryKeys.upstreams, queryFn: coreApi.upstreams, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
+  return combineQueries({ stats, policy, activeModel, upstreams });
 }
 
 export function useLogsData(query = "") {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Braces, Check, Cpu, ShieldCheck } from "lucide-react";
+import { Braces, Check, Copy, Cpu, ShieldCheck } from "lucide-react";
 import { connection } from "../../shared/api/client";
 import type { AuditStatsRange, DailyStat } from "../../shared/api/types";
 import { useI18n } from "../../shared/i18n/I18n";
@@ -12,12 +12,14 @@ export function Overview() {
   const { t, dateLocale } = useI18n();
   const { notify } = useApp();
   const proxy = connection.proxy();
+  const forwardProxy = connection.forwardProxy();
   const [range, setRange] = useState<AuditStatsRange>("today");
   const statsQuery = useOverviewData(range);
   if (statsQuery.isPending || !statsQuery.stats || !statsQuery.policy || statsQuery.activeModel === undefined) return <PageState pending={statsQuery.isPending} error={statsQuery.error} onRetry={() => void statsQuery.refetch()}/>;
   const stats = statsQuery.stats;
   const max = Math.max(1, ...stats.daily.flatMap((item) => [item.entities, item.requests]));
   const ruleCount = t("ruleCount").replace("{count}", statsQuery.policy.rules.length.toLocaleString(dateLocale));
+  const gatewayProviderCount = t("gatewayProviderCount").replace("{count}", statsQuery.upstreams.length.toLocaleString(dateLocale));
   const tpm = Math.round(stats.tokens_per_minute).toLocaleString(dateLocale);
   const cacheHitRate = stats.token_total > 0 ? Math.round((stats.token_cached / stats.token_total) * 100) : 0;
   const rangeOptions = [
@@ -34,11 +36,17 @@ export function Overview() {
 
   return <div className="overview-layout">
     <section className="trust-strip">
-      <div className="trust-strip__title"><ShieldCheck size={16}/><span>{t("path")}</span></div>
+      <div className="trust-strip__topline">
+        <div className="trust-strip__title"><ShieldCheck size={16}/><span>{t("piiProtectionPath")}</span></div>
+        <div className="overview-gateway-addresses">
+          <button className="overview-gateway-address" aria-label={`${t("copy")} ${t("apiGateway")}: ${proxy}`} title={`${t("copy")} ${proxy}`} onClick={() => copy(proxy)}><span>{t("apiGateway")}</span><code>{proxy}</code><Copy size={12}/></button>
+          <button className="overview-gateway-address" aria-label={`${t("copy")} ${t("httpProxyGateway")}: ${forwardProxy}`} title={`${t("copy")} ${forwardProxy}`} onClick={() => copy(forwardProxy)}><span>{t("httpProxyGateway")}</span><code>{forwardProxy}</code><Copy size={12}/></button>
+        </div>
+      </div>
       <div className="protection-capabilities">
-        <div className="protection-node"><span className="protection-node__icon"><Braces size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("rulesEngine")}</small></span><strong>{ruleCount}</strong></span><CapabilityState/></div>
         <div className="protection-node"><span className="protection-node__icon"><Cpu size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("localModel")}</small></span><strong>{statsQuery.activeModel?.name || t("unconfigured")}</strong></span><CapabilityState active={Boolean(statsQuery.activeModel)}/></div>
-        <button className="protection-node protection-node--gateway" aria-label={`${t("copy")} ${t("gateway")}: ${proxy}`} onClick={() => copy(proxy)}><span className="protection-node__icon"><ShieldCheck size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("gateway")}</small></span><span className="protection-node__address"><code>{proxy}</code></span></span><CapabilityState/></button>
+        <div className="protection-node"><span className="protection-node__icon"><Braces size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("rulesEngine")}</small></span><strong>{ruleCount}</strong></span><CapabilityState/></div>
+        <div className="protection-node protection-node--gateway"><span className="protection-node__icon"><ShieldCheck size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("gateway")}</small></span><strong>{gatewayProviderCount}</strong></span><CapabilityState/></div>
       </div>
     </section>
     <div className="overview-workspace overview-workspace--compact">

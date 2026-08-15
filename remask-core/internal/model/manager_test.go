@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +25,55 @@ func TestScanValidatesModelPackage(t *testing.T) {
 	}
 	if len(packages) != 1 || !packages[0].Valid || packages[0].ID != "privacy-q4" {
 		t.Fatalf("unexpected packages: %#v", packages)
+	}
+}
+
+func TestScanIncludesReadOnlyAndManagedModels(t *testing.T) {
+	managedRoot := t.TempDir()
+	builtinRoot := t.TempDir()
+	createTestPackage(t, builtinRoot, "builtin-model")
+	createTestPackage(t, managedRoot, "user-model")
+	manager := NewManager(managedRoot, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	manager.SetReadOnlyRoots(builtinRoot)
+	packages, err := manager.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 2 || packages[0].ID != "builtin-model" || !packages[0].BuiltIn || packages[1].ID != "user-model" || packages[1].BuiltIn {
+		t.Fatalf("unexpected packages: %#v", packages)
+	}
+}
+
+func TestManagedModelOverridesReadOnlyModelWithSameID(t *testing.T) {
+	managedRoot := t.TempDir()
+	builtinRoot := t.TempDir()
+	createTestPackage(t, builtinRoot, "shared-model")
+	createTestPackage(t, managedRoot, "shared-model")
+	manager := NewManager(managedRoot, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	manager.SetReadOnlyRoots(builtinRoot)
+	packages, err := manager.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 1 || packages[0].BuiltIn || packages[0].Path != filepath.Join(managedRoot, "shared-model") {
+		t.Fatalf("managed package must win: %#v", packages)
+	}
+}
+
+func TestDeleteRejectsReadOnlyModel(t *testing.T) {
+	managedRoot := t.TempDir()
+	builtinRoot := t.TempDir()
+	createTestPackage(t, builtinRoot, "builtin-model")
+	manager := NewManager(managedRoot, UnavailableRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	manager.SetReadOnlyRoots(builtinRoot)
+	if _, err := manager.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Delete("builtin-model"); !errors.Is(err, ErrReadOnly) {
+		t.Fatalf("delete error = %v, want ErrReadOnly", err)
+	}
+	if _, err := os.Stat(filepath.Join(builtinRoot, "builtin-model", "manifest.json")); err != nil {
+		t.Fatalf("built-in model was modified: %v", err)
 	}
 }
 

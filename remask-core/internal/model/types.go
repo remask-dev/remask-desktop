@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrNotFound           = errors.New("model not found")
+	ErrReadOnly           = errors.New("built-in model is read-only")
 	ErrRuntimeUnavailable = errors.New("ONNX Runtime is not available in this build")
 )
 
@@ -85,6 +86,7 @@ type Metadata struct {
 type Package struct {
 	ID        string    `json:"id"`
 	Path      string    `json:"-"`
+	BuiltIn   bool      `json:"built_in"`
 	Manifest  Manifest  `json:"manifest"`
 	Valid     bool      `json:"valid"`
 	Errors    []string  `json:"errors"`

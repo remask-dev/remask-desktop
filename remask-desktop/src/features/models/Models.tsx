@@ -231,7 +231,7 @@ function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, onDelete, 
           ? <Button variant="danger" onClick={() => onUnload(model.id)}>{t("unload")}</Button>
           : <>
               <Button variant="primary" disabled={!model.valid || !runtimeAvailable || activatePending} onClick={() => onActivate(model.id)}>{t("activate")}</Button>
-              <Button variant="danger" icon={<Trash2 size={13}/>} onClick={() => onDelete(model.id)}>{t("deleteModel")}</Button>
+              {!model.built_in && <Button variant="danger" icon={<Trash2 size={13}/>} onClick={() => onDelete(model.id)}>{t("deleteModel")}</Button>}
             </>}
       </div>
     </header>

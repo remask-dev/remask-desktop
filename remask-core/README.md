@@ -131,9 +131,12 @@ go run ./cmd/remask-model-downloader \
 ```bash
 go run ./cmd/remask-core \
   -models-dir ./models \
+  -builtin-models-dir ./bundled-models \
   -active-model openai-privacy-filter-q4f16 \
   -onnxruntime-lib /absolute/path/to/onnxruntime.dylib
 ```
+
+Core merges the read-only built-in directory with the writable user model directory. A user model wins when both directories contain the same ID; built-in models can be activated but deletion is rejected.
 
 ONNX Runtime 默认使用 `-onnx-provider auto`：macOS 优先 CoreML（Apple GPU/Neural Engine），Windows 优先 DirectML，Linux 优先 CUDA、ROCm 或 OpenVINO GPU；GPU provider 不可用时自动回退 CPU。也可以显式选择 provider 和 GPU 编号：
 

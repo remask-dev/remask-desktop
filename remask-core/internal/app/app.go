@@ -40,6 +40,7 @@ func NewWithHTTPClient(logger *log.Logger, httpClient *http.Client) (*App, error
 type Options struct {
 	HTTPClient             *http.Client
 	ModelsDir              string
+	BuiltinModelsDir       string
 	Runtime                model.Runtime
 	ActiveModel            string
 	DataDir                string
@@ -97,6 +98,9 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 		modelsDir = "models"
 	}
 	models := model.NewManager(modelsDir, options.Runtime, detector, operations)
+	if options.BuiltinModelsDir != "" {
+		models.SetReadOnlyRoots(options.BuiltinModelsDir)
+	}
 	selectionStore := model.NewSelectionStore(options.DataDir)
 	models.SetSelectionStore(selectionStore)
 	models.SetMaxInferenceTokens(audits.Settings().MaxInferenceTokens)

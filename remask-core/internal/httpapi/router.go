@@ -571,6 +571,8 @@ func (r *Router) deleteModel(w http.ResponseWriter, request *http.Request) {
 		status, code := http.StatusConflict, "MODEL_DELETE_FAILED"
 		if errors.Is(err, model.ErrNotFound) {
 			status, code = http.StatusNotFound, "MODEL_NOT_FOUND"
+		} else if errors.Is(err, model.ErrReadOnly) {
+			status, code = http.StatusForbidden, "MODEL_READ_ONLY"
 		}
 		writeError(w, status, code, err.Error())
 		return

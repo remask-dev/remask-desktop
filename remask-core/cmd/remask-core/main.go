@@ -23,6 +23,7 @@ func main() {
 	proxyAddr := flag.String("proxy-addr", "127.0.0.1:17681", "AI proxy listen address")
 	forwardProxyAddr := flag.String("forward-proxy-addr", "127.0.0.1:17682", "explicit HTTP/HTTPS proxy listen address")
 	modelsDir := flag.String("models-dir", "models", "managed model directory")
+	builtinModelsDir := flag.String("builtin-models-dir", "", "read-only built-in model directory")
 	activeModel := flag.String("active-model", os.Getenv("REMASK_ACTIVE_MODEL"), "model ID to load before serving requests")
 	onnxRuntimeLibrary := flag.String("onnxruntime-lib", "", "path to the ONNX Runtime shared library")
 	onnxProvider := flag.String("onnx-provider", envOr("REMASK_ONNX_PROVIDER", "auto"), "ONNX execution provider: auto, cpu, coreml, cuda, directml, tensorrt, rocm, or openvino")
@@ -52,7 +53,7 @@ func main() {
 		logger.Printf("initialize model runtime: %v", err)
 		os.Exit(1)
 	}
-	application, err := app.NewWithOptions(logger, app.Options{ModelsDir: *modelsDir, Runtime: runtime, ActiveModel: *activeModel, DataDir: *dataDir})
+	application, err := app.NewWithOptions(logger, app.Options{ModelsDir: *modelsDir, BuiltinModelsDir: *builtinModelsDir, Runtime: runtime, ActiveModel: *activeModel, DataDir: *dataDir})
 	if err != nil {
 		logger.Printf("initialize application: %v", err)
 		os.Exit(1)

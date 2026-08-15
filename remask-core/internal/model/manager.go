@@ -20,11 +20,12 @@ import (
 )
 
 type Manager struct {
-	root       string
-	runtime    Runtime
-	detector   *pii.DynamicDetector
-	operations *operation.Store
-	selection  *SelectionStore
+	root          string
+	readOnlyRoots []string
+	runtime       Runtime
+	detector      *pii.DynamicDetector
+	operations    *operation.Store
+	selection     *SelectionStore
 
 	transitionMu       sync.Mutex
 	mu                 sync.RWMutex
@@ -42,6 +43,13 @@ func NewManager(root string, runtime Runtime, detector *pii.DynamicDetector, ope
 		runtime = UnavailableRuntime{}
 	}
 	return &Manager{root: root, runtime: runtime, detector: detector, operations: operations, packages: make(map[string]Package), maxInferenceTokens: MaxInferenceTokens}
+}
+
+// SetReadOnlyRoots adds model directories that participate in discovery but
+// are never used for downloads or deletion. The writable root always wins
+// when the same model ID exists in both locations.
+func (m *Manager) SetReadOnlyRoots(roots ...string) {
+	m.readOnlyRoots = append([]string(nil), roots...)
 }
 
 // SetMaxInferenceTokens changes the safety limit used by subsequently loaded
@@ -74,34 +82,28 @@ func (m *Manager) Scan(ctx context.Context) ([]Package, error) {
 	if err := os.MkdirAll(m.root, 0o755); err != nil {
 		return nil, err
 	}
-	discovered := make(map[string]Package)
-	entries, err := os.ReadDir(m.root)
+	managedRoot, err := filepath.Abs(m.root)
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
+	discovered := make(map[string]Package)
+	seenRoots := make(map[string]bool)
+	for _, root := range append(append([]string(nil), m.readOnlyRoots...), managedRoot) {
+		cleanRoot, err := filepath.Abs(root)
+		if err != nil {
 			return nil, err
 		}
-		if !entry.IsDir() {
+		if seenRoots[cleanRoot] {
 			continue
 		}
-		packagePath := filepath.Join(m.root, entry.Name())
-		if _, err := os.Stat(filepath.Join(packagePath, "manifest.json")); err != nil {
-			if os.IsNotExist(err) {
+		seenRoots[cleanRoot] = true
+		builtIn := filepath.Clean(cleanRoot) != filepath.Clean(managedRoot)
+		if err := scanRoot(ctx, cleanRoot, builtIn, discovered); err != nil {
+			if builtIn && os.IsNotExist(err) {
 				continue
 			}
 			return nil, err
 		}
-		item := validatePackage(packagePath)
-		if item.ID == "" {
-			item.ID = entry.Name()
-		}
-		if item.ID != entry.Name() {
-			item.Errors = append(item.Errors, "manifest id must match the model directory name")
-			item.Valid = false
-		}
-		discovered[item.ID] = item
 	}
 
 	m.mu.Lock()
@@ -115,6 +117,39 @@ func (m *Manager) Scan(ctx context.Context) ([]Package, error) {
 	m.packages = discovered
 	m.mu.Unlock()
 	return m.List(), nil
+}
+
+func scanRoot(ctx context.Context, root string, builtIn bool, discovered map[string]Package) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		packagePath := filepath.Join(root, entry.Name())
+		if _, err := os.Stat(filepath.Join(packagePath, "manifest.json")); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		item := validatePackage(packagePath)
+		item.BuiltIn = builtIn
+		if item.ID == "" {
+			item.ID = entry.Name()
+		}
+		if item.ID != entry.Name() {
+			item.Errors = append(item.Errors, "manifest id must match the model directory name")
+			item.Valid = false
+		}
+		discovered[item.ID] = item
+	}
+	return nil
 }
 
 func (m *Manager) List() []Package {
@@ -310,6 +345,9 @@ func (m *Manager) Delete(id string) error {
 	m.mu.RUnlock()
 	if !ok {
 		return ErrNotFound
+	}
+	if item.BuiltIn {
+		return ErrReadOnly
 	}
 	if active != nil && active.Metadata().ID == id {
 		return errors.New("cannot delete the active model; unload it first")
