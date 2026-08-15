@@ -60,6 +60,12 @@ func New(logger *log.Logger, upstreams *upstream.Registry, profiles *profile.Reg
 	}
 }
 
+// DebugMode reports the live request tracing setting. It is intentionally
+// read for every request so changing the setting takes effect immediately.
+func (g *Gateway) DebugMode() bool {
+	return g.audits != nil && g.audits.Settings().Debug
+}
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	configured, upstreamPath, operation, matched, routeErr := g.resolveRoute(r.Method, r.URL.Path)
 	if routeErr != nil {
@@ -87,7 +93,12 @@ func (g *Gateway) ServeUpstreamHTTP(w http.ResponseWriter, r *http.Request, conf
 
 func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured upstream.Upstream, upstreamPath string, operation profile.Operation, matched bool) {
 	redactionDuration := int64(0)
+	debug := g.DebugMode()
 	counted := &countingResponseWriter{ResponseWriter: w}
+	var requestBody bytes.Buffer
+	if debug {
+		counted.capture = &bytes.Buffer{}
+	}
 	w = counted
 	operationErr := profile.ErrNoMatch
 	if matched {
@@ -108,7 +119,8 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	}
 	auditEntry := audit.Entry{
 		Timestamp: time.Now().UTC(), UpstreamID: configured.ID, ProfileID: configured.ProfileID,
-		OperationID: operationID, ProtectionMode: protectionMode, Method: r.Method, Path: upstreamPath,
+		OperationID: operationID, Model: extractModelFromPath(upstreamPath), ProtectionMode: protectionMode,
+		Method: r.Method, Path: upstreamPath,
 	}
 	defer func() {
 		for _, field := range auditEntry.Fields {
@@ -117,12 +129,27 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		auditEntry.StatusCode = counted.StatusCode()
 		auditEntry.DurationMS = redactionDuration
 		auditEntry.ResponseBytes = counted.bytes
+		if debug {
+			auditEntry.Debug = &audit.DebugExchange{
+				Request: audit.DebugRequest{
+					Method: r.Method, URL: r.URL.RequestURI(),
+					Headers: map[string][]string(r.Header.Clone()), Body: requestBody.String(),
+				},
+				Response: audit.DebugResponse{
+					Status: counted.StatusCode(), Headers: map[string][]string(counted.Header().Clone()),
+					Body: counted.capture.String(),
+				},
+			}
+		}
 		if err := g.audits.Add(auditEntry); err != nil {
 			g.logger.Printf("audit_write_failed upstream=%s error=%v", configured.ID, err)
 		}
 	}()
 
 	body, err := readBody(r.Body, maxBodyBytes)
+	if debug {
+		_, _ = requestBody.Write(body)
+	}
 	if err != nil {
 		if errors.Is(err, errBodyTooLarge) {
 			passthrough = true
@@ -132,13 +159,20 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 			} else {
 				auditEntry.RequestBytes = int64(len(body))
 			}
-			g.serveOversizedPassthrough(w, r, configured, upstreamPath, io.MultiReader(bytes.NewReader(body), r.Body), &auditEntry)
+			remaining := io.Reader(r.Body)
+			if debug {
+				remaining = io.TeeReader(remaining, &requestBody)
+			}
+			g.serveOversizedPassthrough(w, r, configured, upstreamPath, io.MultiReader(bytes.NewReader(body), remaining), &auditEntry)
 			return
 		}
 		writeProxyError(w, http.StatusRequestEntityTooLarge, "REQUEST_BODY_INVALID", err.Error())
 		return
 	}
 	auditEntry.RequestBytes = int64(len(body))
+	if model := extractModelFromBody(body); model != "" {
+		auditEntry.Model = model
+	}
 	if operationErr != nil && isJSON(r.Header.Get("Content-Type")) {
 		if fallback, fallbackErr := profile.GenericMatch(r.Method, body); fallbackErr == nil {
 			operation = fallback
@@ -671,6 +705,36 @@ func extractTokenUsage(body []byte) audit.TokenUsage {
 	return usageFromValue(root)
 }
 
+// extractModelFromBody reads only the top-level model field. Model names are
+// request metadata and do not need the more permissive recursive traversal used
+// for token usage extraction.
+func extractModelFromBody(body []byte) string {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(body, &object); err != nil {
+		return ""
+	}
+	var model string
+	if err := json.Unmarshal(object["model"], &model); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(model)
+}
+
+// Some providers, notably Gemini, encode the requested model in the route
+// (for example /v1beta/models/gemini-2.0-flash:generateContent).
+func extractModelFromPath(path string) string {
+	const marker = "/models/"
+	index := strings.LastIndex(path, marker)
+	if index < 0 {
+		return ""
+	}
+	model := path[index+len(marker):]
+	if end := strings.IndexAny(model, "/:"); end >= 0 {
+		model = model[:end]
+	}
+	return strings.TrimSpace(model)
+}
+
 func usageFromValue(value any) audit.TokenUsage {
 	result := audit.TokenUsage{}
 	var walk func(any)
@@ -735,8 +799,9 @@ func mergeTokenUsage(target *audit.TokenUsage, value audit.TokenUsage) {
 
 type countingResponseWriter struct {
 	http.ResponseWriter
-	status int
-	bytes  int64
+	status  int
+	bytes   int64
+	capture *bytes.Buffer
 }
 
 func (w *countingResponseWriter) WriteHeader(status int) {
@@ -752,6 +817,9 @@ func (w *countingResponseWriter) Write(value []byte) (int, error) {
 	}
 	written, err := w.ResponseWriter.Write(value)
 	w.bytes += int64(written)
+	if w.capture != nil && written > 0 {
+		_, _ = w.capture.Write(value[:written])
+	}
 	return written, err
 }
 

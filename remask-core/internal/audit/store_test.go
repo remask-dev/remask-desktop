@@ -16,7 +16,7 @@ func TestStorePersistsAndAggregatesMaskedAudit(t *testing.T) {
 	}
 	entry := Entry{
 		Timestamp: time.Now().UTC(), UpstreamID: "openai", ProfileID: "openai",
-		OperationID: "create-chat-completion", Method: "POST", Path: "/v1/chat/completions",
+		OperationID: "create-chat-completion", Model: "gpt-4.1-mini", Method: "POST", Path: "/v1/chat/completions",
 		StatusCode: 200, DurationMS: 18, EntityCount: 1, TokenUsage: TokenUsage{Input: 12, Output: 8, Total: 20, Cached: 6},
 		Fields: []Field{{Path: "/messages/0/content", OriginalMasked: "联系 [PHONE_NUMBER]", Redacted: "联系 <PHONE_NUMBER:A7F2>", Entities: []Entity{{Type: "PHONE_NUMBER", Replacement: "<PHONE_NUMBER:A7F2>"}}}},
 	}
@@ -42,9 +42,33 @@ func TestStorePersistsAndAggregatesMaskedAudit(t *testing.T) {
 	if logs[0].TokenUsage.Cached != 6 {
 		t.Fatalf("cached token usage was not persisted: %#v", logs[0].TokenUsage)
 	}
+	if logs[0].Model != "gpt-4.1-mini" {
+		t.Fatalf("request model was not persisted: %#v", logs[0])
+	}
+	if matched := loaded.List(Query{Limit: 10, Search: "gpt-4.1-mini"}); len(matched) != 1 {
+		t.Fatalf("request model was not searchable: %#v", matched)
+	}
 	stats := loaded.Stats(7)
 	if stats.Requests != 1 || stats.Entities != 1 || stats.EntityTypes["PHONE_NUMBER"] != 1 || stats.SuccessRate != 1 {
 		t.Fatalf("unexpected stats: %#v", stats)
+	}
+}
+
+func TestStoreInitializesSettingsFile(t *testing.T) {
+	directory := t.TempDir()
+	store, err := NewStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(directory, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"debug"`) {
+		t.Fatalf("default debug setting should not be written: %s", data)
+	}
+	if got := store.Settings(); got.Debug {
+		t.Fatalf("debug should be disabled by default: %#v", got)
 	}
 }
 
@@ -92,6 +116,7 @@ func TestEntityCacheSettingsDefaultOnAndPersisted(t *testing.T) {
 	}
 	settings.EntityCacheEnabled = false
 	settings.EntityCacheTTLSeconds = 60
+	settings.Debug = true
 	if err := store.Configure(settings); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +124,7 @@ func TestEntityCacheSettingsDefaultOnAndPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := loaded.Settings(); got.EntityCacheEnabled || got.EntityCacheTTLSeconds != 60 {
+	if got := loaded.Settings(); got.EntityCacheEnabled || got.EntityCacheTTLSeconds != 60 || !got.Debug {
 		t.Fatalf("entity cache settings were not persisted: %#v", got)
 	}
 }

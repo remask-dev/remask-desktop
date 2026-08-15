@@ -64,6 +64,7 @@ func DefaultPolicySettings() PolicySettings {
 
 func NewRuleDetectorWithDataDir(dataDir string) (*RuleDetector, error) {
 	d := &RuleDetector{policy: DefaultPolicySettings()}
+	initializePolicy := false
 	if dataDir != "" {
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			return nil, err
@@ -75,6 +76,8 @@ func NewRuleDetectorWithDataDir(dataDir string) (*RuleDetector, error) {
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
+		} else {
+			initializePolicy = true
 		}
 	}
 	compiled, err := compilePolicy(d.policy)
@@ -82,6 +85,11 @@ func NewRuleDetectorWithDataDir(dataDir string) (*RuleDetector, error) {
 		return nil, err
 	}
 	d.rules = compiled
+	if initializePolicy {
+		if err := d.Configure(d.policy); err != nil {
+			return nil, err
+		}
+	}
 	return d, nil
 }
 

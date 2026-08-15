@@ -19,6 +19,7 @@ const timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 type Settings struct {
 	RecordRequestContent  bool   `json:"record_request_content"`
+	Debug                 bool   `json:"debug,omitempty"`
 	RetentionDays         int    `json:"retention_days"`
 	HFBaseURL             string `json:"hf_base_url,omitempty"`
 	MaxInferenceTokens    int    `json:"max_inference_tokens"`
@@ -82,24 +83,44 @@ type Field struct {
 	Entities       []Entity `json:"entities"`
 }
 
+type DebugRequest struct {
+	Method  string              `json:"method"`
+	URL     string              `json:"url"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Body    string              `json:"body,omitempty"`
+}
+
+type DebugResponse struct {
+	Status  int                 `json:"status"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Body    string              `json:"body,omitempty"`
+}
+
+type DebugExchange struct {
+	Request  DebugRequest  `json:"request"`
+	Response DebugResponse `json:"response"`
+}
+
 type Entry struct {
-	ID             string     `json:"id"`
-	Timestamp      time.Time  `json:"timestamp"`
-	UpstreamID     string     `json:"upstream_id"`
-	ProfileID      string     `json:"profile_id"`
-	OperationID    string     `json:"operation_id"`
-	ProtectionMode string     `json:"protection_mode,omitempty"`
-	Method         string     `json:"method"`
-	Path           string     `json:"path"`
-	StatusCode     int        `json:"status_code"`
-	DurationMS     int64      `json:"duration_ms"`
-	Streaming      bool       `json:"streaming"`
-	RequestBytes   int64      `json:"request_bytes"`
-	ResponseBytes  int64      `json:"response_bytes"`
-	EntityCount    int        `json:"entity_count"`
-	TokenUsage     TokenUsage `json:"token_usage"`
-	Fields         []Field    `json:"fields,omitempty"`
-	ErrorCode      string     `json:"error_code,omitempty"`
+	ID             string         `json:"id"`
+	Timestamp      time.Time      `json:"timestamp"`
+	UpstreamID     string         `json:"upstream_id"`
+	ProfileID      string         `json:"profile_id"`
+	OperationID    string         `json:"operation_id"`
+	Model          string         `json:"model,omitempty"`
+	ProtectionMode string         `json:"protection_mode,omitempty"`
+	Method         string         `json:"method"`
+	Path           string         `json:"path"`
+	StatusCode     int            `json:"status_code"`
+	DurationMS     int64          `json:"duration_ms"`
+	Streaming      bool           `json:"streaming"`
+	RequestBytes   int64          `json:"request_bytes"`
+	ResponseBytes  int64          `json:"response_bytes"`
+	EntityCount    int            `json:"entity_count"`
+	TokenUsage     TokenUsage     `json:"token_usage"`
+	Fields         []Field        `json:"fields,omitempty"`
+	Debug          *DebugExchange `json:"debug,omitempty"`
+	ErrorCode      string         `json:"error_code,omitempty"`
 }
 
 type Query struct {
@@ -160,6 +181,16 @@ func NewStore(dataDir string) (*Store, error) {
 		if err := store.loadSettings(); err != nil {
 			return nil, err
 		}
+		// Initialize the user configuration on first startup. Subsequent
+		// launches always load settings from this file and PUT /settings keeps
+		// it updated.
+		if _, err := os.Stat(store.settingsPath); errors.Is(err, os.ErrNotExist) {
+			if err := store.writeSettingsLocked(); err != nil {
+				return nil, err
+			}
+		} else if err != nil {
+			return nil, err
+		}
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -197,6 +228,7 @@ func (s *Store) initialize() error {
 			upstream_id TEXT NOT NULL,
 			profile_id TEXT NOT NULL,
 			operation_id TEXT NOT NULL,
+			model TEXT NOT NULL DEFAULT '',
 			protection_mode TEXT NOT NULL,
 			method TEXT NOT NULL,
 			path TEXT NOT NULL,
@@ -211,6 +243,8 @@ func (s *Store) initialize() error {
 			token_total INTEGER NOT NULL,
 			token_cached INTEGER NOT NULL DEFAULT 0,
 			fields_json TEXT NOT NULL,
+			debug_request_json TEXT NOT NULL DEFAULT '',
+			debug_response_json TEXT NOT NULL DEFAULT '',
 			error_code TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_audit_entries_timestamp ON audit_entries(timestamp DESC);
@@ -231,6 +265,19 @@ func (s *Store) initialize() error {
 	// SQLite has no IF NOT EXISTS variant for ADD COLUMN, so ignore the
 	// duplicate-column error while preserving all existing audit records.
 	_, alterErr := s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN token_cached INTEGER NOT NULL DEFAULT 0`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
+		return alterErr
+	}
+	// Additive schema update for databases created before request model logging.
+	_, alterErr = s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN model TEXT NOT NULL DEFAULT ''`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
+		return alterErr
+	}
+	_, alterErr = s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN debug_request_json TEXT NOT NULL DEFAULT ''`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
+		return alterErr
+	}
+	_, alterErr = s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN debug_response_json TEXT NOT NULL DEFAULT ''`)
 	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
 		return alterErr
 	}
@@ -276,8 +323,19 @@ func (s *Store) Add(entry Entry) error {
 	if !settings.RecordRequestContent {
 		entry.Fields = nil
 	}
+	if !settings.Debug {
+		entry.Debug = nil
+	}
 	sortFields(entry.Fields)
 	fields, err := json.Marshal(entry.Fields)
+	if err != nil {
+		return err
+	}
+	debugRequest, err := marshalDebugPart(entry.Debug, true)
+	if err != nil {
+		return err
+	}
+	debugResponse, err := marshalDebugPart(entry.Debug, false)
 	if err != nil {
 		return err
 	}
@@ -287,14 +345,14 @@ func (s *Store) Add(entry Entry) error {
 	}
 	defer tx.Rollback()
 	_, err = tx.Exec(`INSERT INTO audit_entries (
-		id, timestamp, upstream_id, profile_id, operation_id, protection_mode, method, path,
+		id, timestamp, upstream_id, profile_id, operation_id, model, protection_mode, method, path,
 		status_code, duration_ms, streaming, request_bytes, response_bytes, entity_count,
-		token_input, token_output, token_total, token_cached, fields_json, error_code
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		token_input, token_output, token_total, token_cached, fields_json, debug_request_json, debug_response_json, error_code
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.Timestamp.UTC().Format(timestampLayout), entry.UpstreamID, entry.ProfileID,
-		entry.OperationID, entry.ProtectionMode, entry.Method, entry.Path, entry.StatusCode,
+		entry.OperationID, entry.Model, entry.ProtectionMode, entry.Method, entry.Path, entry.StatusCode,
 		entry.DurationMS, entry.Streaming, entry.RequestBytes, entry.ResponseBytes, entry.EntityCount,
-		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), entry.ErrorCode)
+		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), debugRequest, debugResponse, entry.ErrorCode)
 	if err != nil {
 		return err
 	}
@@ -315,6 +373,33 @@ func (s *Store) Add(entry Entry) error {
 	return s.prune(time.Now().UTC())
 }
 
+func marshalDebugPart(exchange *DebugExchange, request bool) (string, error) {
+	if exchange == nil {
+		return "", nil
+	}
+	value := exchange.Response
+	if request {
+		data, err := json.Marshal(exchange.Request)
+		return string(data), err
+	}
+	data, err := json.Marshal(value)
+	return string(data), err
+}
+
+func unmarshalDebugExchange(requestJSON, responseJSON string) *DebugExchange {
+	if requestJSON == "" && responseJSON == "" {
+		return nil
+	}
+	exchange := &DebugExchange{}
+	if requestJSON != "" {
+		_ = json.Unmarshal([]byte(requestJSON), &exchange.Request)
+	}
+	if responseJSON != "" {
+		_ = json.Unmarshal([]byte(responseJSON), &exchange.Response)
+	}
+	return exchange
+}
+
 func (s *Store) List(query Query) []Entry {
 	limit := query.Limit
 	if limit <= 0 || limit > 500 {
@@ -332,13 +417,13 @@ func (s *Store) List(query Query) []Entry {
 		clauses = append(clauses, "(status_code < 200 OR status_code >= 400)")
 	}
 	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
-		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
+		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
 		args = append(args, "%"+search+"%")
 	}
 	args = append(args, limit)
-	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id,
+	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
 		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
-		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, error_code
+		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, debug_request_json, debug_response_json, error_code
 		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
 	if err != nil {
 		return []Entry{}
@@ -347,15 +432,16 @@ func (s *Store) List(query Query) []Entry {
 	result := make([]Entry, 0, limit)
 	for rows.Next() {
 		var entry Entry
-		var timestamp, fields string
-		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID,
+		var timestamp, fields, debugRequest, debugResponse string
+		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
 			&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
-			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &entry.ErrorCode); err != nil {
+			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &debugRequest, &debugResponse, &entry.ErrorCode); err != nil {
 			continue
 		}
 		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 		_ = json.Unmarshal([]byte(fields), &entry.Fields)
+		entry.Debug = unmarshalDebugExchange(debugRequest, debugResponse)
 		sortFields(entry.Fields)
 		result = append(result, entry)
 	}
@@ -521,22 +607,9 @@ func (s *Store) loadSettings() error {
 	if err != nil {
 		return err
 	}
-	// Migrate the pre-content-toggle setting name (record_request_logs) so a
-	// user who disabled logging before this rename keeps their choice.
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
-	}
-	if _, exists := raw["record_request_content"]; !exists {
-		if legacy, ok := raw["record_request_logs"].(bool); ok {
-			raw["record_request_content"] = legacy
-		}
-		delete(raw, "record_request_logs")
-		migrated, err := json.Marshal(raw)
-		if err != nil {
-			return err
-		}
-		data = migrated
 	}
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {

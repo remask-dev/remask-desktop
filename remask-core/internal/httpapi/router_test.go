@@ -103,6 +103,47 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 	}
 }
 
+func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"debug response"}}]}`)),
+			Request:    r,
+		}, nil
+	})}
+	logger := log.New(io.Discard, "", 0)
+	application, err := app.NewWithHTTPClient(logger, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := combinedTestHandler(application.Handler(), application.ProxyHandler())
+	configureUpstream(t, handler)
+
+	settings := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"audit":{"record_request_content":true,"debug":true,"retention_days":30,"max_inference_tokens":512,"inference_provider":"cpu","entity_cache_enabled":true,"entity_cache_ttl_seconds":300}}`))
+	settings.Header.Set("Content-Type", "application/json")
+	settingsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(settingsResponse, settings)
+	if settingsResponse.Code != http.StatusOK {
+		t.Fatalf("enable debug mode: %d %s", settingsResponse.Code, settingsResponse.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"debug@example.com"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("proxy response: %d %s", response.Code, response.Body.String())
+	}
+	logsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logsResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs", nil))
+	if logsResponse.Code != http.StatusOK || !strings.Contains(logsResponse.Body.String(), `"debug":{"request"`) ||
+		!strings.Contains(logsResponse.Body.String(), "debug@example.com") || !strings.Contains(logsResponse.Body.String(), "debug response") {
+		t.Fatalf("debug exchange was not persisted: %d %s", logsResponse.Code, logsResponse.Body.String())
+	}
+}
+
 func TestJSONProxyDoesNotRedactAIAnswersByDefault(t *testing.T) {
 	var upstreamBody []byte
 	handler := testHandlerWithClient(t, &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -355,7 +396,7 @@ func TestUnmatchedModelPathUsesGenericStrategy(t *testing.T) {
 
 	logs := httptest.NewRecorder()
 	handler.ServeHTTP(logs, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs?limit=1", nil))
-	if !strings.Contains(logs.Body.String(), `"operation_id":"generic-model-request"`) || !strings.Contains(logs.Body.String(), `"protection_mode":"redacted"`) {
+	if !strings.Contains(logs.Body.String(), `"operation_id":"generic-model-request"`) || !strings.Contains(logs.Body.String(), `"model":"custom-model"`) || !strings.Contains(logs.Body.String(), `"protection_mode":"redacted"`) {
 		t.Fatalf("generic fallback audit entry missing: %s", logs.Body.String())
 	}
 }

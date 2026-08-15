@@ -2,7 +2,7 @@ import { Activity, Bot, FileClock, FlaskConical, Gauge, ListChecks, LockKeyhole,
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { connection, coreApi } from "../shared/api/client";
 import { useI18n } from "../shared/i18n/I18n";
 import { Button } from "../shared/ui/Button";
@@ -54,4 +54,14 @@ export function Shell() {
     <footer className="statusbar">{!initialLoading&&<><span><StatusDot tone={connected?"success":"muted"}/>{connected?t("coreOnline"):t("coreOffline")}</span><span className="spacer"/><span><code>remask-core</code> {core.data?.version.version||"—"}</span></>}</footer><Toast message={toast}/>
   </div>;
 }
-function Disconnected({restart}:{restart:()=>void}) { const {t}=useI18n(); return <div className="empty-page"><div className="empty-page__icon"><ShieldCheck size={26}/></div><h2>{t("offline")}</h2><Button variant="primary" onClick={restart} icon={<RefreshCw size={14}/>}>{t("restart")}</Button></div>; }
+function Disconnected({restart}:{restart:()=>void}) {
+  const {t}=useI18n();
+  const [showRestart, setShowRestart] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowRestart(true), 15_000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return <div className="empty-page"><div className="empty-page__icon"><ShieldCheck size={26}/></div><h2>{t("offline")}</h2>{showRestart&&<Button className="mt-4" variant="secondary" onClick={restart} icon={<RefreshCw size={14}/>}>{t("restart")}</Button>}</div>;
+}

@@ -335,11 +335,11 @@ type settingsRequest struct {
 	} `json:"models"`
 	entityCacheEnabledSet    bool
 	entityCacheTTLSecondsSet bool
+	debugSet                 bool
 }
 
-// UnmarshalJSON tracks the presence of the cache fields so older desktop
-// clients can update unrelated settings without accidentally disabling the
-// newly introduced default-on cache.
+// UnmarshalJSON tracks the presence of optional settings so partial updates
+// preserve values that were not included in the request.
 func (r *settingsRequest) UnmarshalJSON(data []byte) error {
 	type wire struct {
 		Audit  json.RawMessage `json:"audit"`
@@ -361,6 +361,7 @@ func (r *settingsRequest) UnmarshalJSON(data []byte) error {
 		}
 		_, r.entityCacheEnabledSet = fields["entity_cache_enabled"]
 		_, r.entityCacheTTLSecondsSet = fields["entity_cache_ttl_seconds"]
+		_, r.debugSet = fields["debug"]
 	}
 	r.Models = value.Models
 	return nil
@@ -377,6 +378,9 @@ func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	if !input.entityCacheTTLSecondsSet {
 		input.Audit.EntityCacheTTLSeconds = current.EntityCacheTTLSeconds
+	}
+	if !input.debugSet {
+		input.Audit.Debug = current.Debug
 	}
 	if input.Models != nil {
 		input.Audit.HFBaseURL = strings.TrimSpace(input.Models.HFBaseURL)
@@ -613,6 +617,9 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func requestMiddleware(logger *log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
+		defer func() {
+			logger.Printf("http_request method=%s path=%s duration_ms=%d", r.Method, safePath(r.URL.Path), time.Since(started).Milliseconds())
+		}()
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if !allowedOrigin(origin) {
 				writeError(w, http.StatusForbidden, "ORIGIN_NOT_ALLOWED", "browser origin is not allowed")
@@ -628,7 +635,6 @@ func requestMiddleware(logger *log.Logger, next http.Handler) http.Handler {
 			}
 		}
 		next.ServeHTTP(w, r)
-		logger.Printf("http_request method=%s path=%s duration_ms=%d", r.Method, safePath(r.URL.Path), time.Since(started).Milliseconds())
 	})
 }
 

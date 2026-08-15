@@ -39,3 +39,21 @@ func TestExtractTokenUsageFromSSE(t *testing.T) {
 		t.Fatalf("usage = %#v", usage)
 	}
 }
+
+func TestExtractRequestModel(t *testing.T) {
+	if got := extractModelFromBody([]byte(`{"model":"gpt-4.1","messages":[]}`)); got != "gpt-4.1" {
+		t.Fatalf("body model = %q", got)
+	}
+	if got := extractModelFromBody([]byte(`{"model":42}`)); got != "" {
+		t.Fatalf("non-string body model = %q", got)
+	}
+	for path, want := range map[string]string{
+		"/v1beta/models/gemini-2.0-flash:generateContent":                                "gemini-2.0-flash",
+		"/v1beta/models/publishers/google/models/gemini-2.0-flash:streamGenerateContent": "gemini-2.0-flash",
+		"/v1/models": "",
+	} {
+		if got := extractModelFromPath(path); got != want {
+			t.Fatalf("path %q model = %q, want %q", path, got, want)
+		}
+	}
+}
