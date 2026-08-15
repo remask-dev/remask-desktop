@@ -1,7 +1,9 @@
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use tauri::menu::{Menu, MenuItem};
@@ -216,11 +218,64 @@ fn find_runtime_library(resource_dir: &Path) -> Option<PathBuf> {
 
 #[tauri::command]
 fn stop_core(state: State<'_, CoreProcess>) -> Result<(), String> {
+    stop_core_process(state.inner())?;
+    Ok(())
+}
+
+fn stop_core_process(state: &CoreProcess) -> Result<bool, String> {
     let mut process = state.0.lock().map_err(|_| "core process lock poisoned")?;
     if let Some(child) = process.take() {
         child.kill().map_err(|error| error.to_string())?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
+}
+
+/// Stop-and-start must not race the old process while its listeners are still
+/// being torn down. Wait until all configured ports reject connections before
+/// spawning the replacement.
+fn wait_for_ports_to_close(addresses: &[SocketAddr]) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if addresses
+            .iter()
+            .all(|address| TcpStream::connect_timeout(address, Duration::from_millis(50)).is_err())
+        {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[tauri::command]
+fn restart_core(
+    app: AppHandle,
+    state: State<'_, CoreProcess>,
+    address: String,
+    proxy_address: String,
+    forward_proxy_address: String,
+) -> Result<(), String> {
+    // Validate the values before stopping the currently healthy Core.
+    let addresses = [
+        address.parse::<SocketAddr>(),
+        proxy_address.parse::<SocketAddr>(),
+        forward_proxy_address.parse::<SocketAddr>(),
+    ];
+    let addresses = addresses
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "core addresses must be IP addresses and ports".to_string())?;
+
+    if stop_core_process(state.inner())? {
+        wait_for_ports_to_close(&addresses);
+    }
+    spawn_core(
+        &app,
+        state.inner(),
+        &address,
+        &proxy_address,
+        &forward_proxy_address,
+    )
 }
 
 #[tauri::command]
@@ -307,6 +362,9 @@ pub fn run() {
             // Launched at login: run minimized in the tray. Manual launches
             // show the main window as usual.
             if launched_at_login {
+                // Keep a background launch out of the Dock while retaining the
+                // menu-bar item that can restore the window.
+                set_dock_visibility(app.handle(), false);
                 let _ = window.hide();
             } else {
                 window.show()?;
@@ -328,6 +386,9 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" && !QUITTING.load(Ordering::Relaxed) {
                     api.prevent_close();
+                    // Hiding the Dock item is separate from hiding the window:
+                    // this leaves the tray available as the way back in.
+                    set_dock_visibility(window.app_handle(), false);
                     let _ = window.hide();
                 }
             }
@@ -335,6 +396,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_core,
             stop_core,
+            restart_core,
             system_certificate_status,
             install_system_certificate,
             launch_ai_client
@@ -345,8 +407,22 @@ pub fn run() {
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        // Restore the regular foreground application before showing the
+        // window. Tauri's macOS implementation preserves the app icon while
+        // switching it back from the menu-bar-only state.
+        set_dock_visibility(app, true);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+/// Toggle the macOS Dock item without changing the tray icon. On other
+/// platforms this is intentionally a no-op so the window lifecycle remains
+/// shared by all desktop targets.
+fn set_dock_visibility(app: &AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    if let Err(error) = app.set_dock_visibility(visible) {
+        eprintln!("failed to set Dock visibility to {visible}: {error}");
     }
 }

@@ -293,7 +293,10 @@ fn set_icon_for_ns_status_item_button(
 
         let (width, height) = icon.inner.get_size();
 
-        let icon_height: f64 = 18.0;
+        // macOS menu-bar items are about 22pt high on current systems. Use a
+        // slightly larger image canvas so the mark keeps its physical size
+        // while gaining a small amount of transparent breathing room.
+        let icon_height: f64 = 23.0;
         let icon_width: f64 = (width as f64) / (height as f64 / icon_height);
 
         unsafe {

@@ -1,5 +1,7 @@
 .DS_Store
 
+.idea
+
 # Go build outputs
 /remask-core/remask-core
 /remask-core/coverage.out

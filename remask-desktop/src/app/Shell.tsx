@@ -25,19 +25,24 @@ export function Shell() {
   const { t } = useI18n(); const { view, setView, toast, notify } = useApp(); const queryClient = useQueryClient();
   const core = useCore(); const connected = Boolean(core.data);
   const initialLoading = core.isPending && !core.data;
+  const [restarting, setRestarting] = useState(false);
   const meta: Record<View, [string,string]> = { overview:[t("overviewTitle"),t("overviewSub")], logs:[t("logsTitle"),t("logsSub")], test:[t("testTitle"),t("testSub")], services:[t("servicesTitle"),t("servicesSub")], models:[t("modelsTitle"),t("modelsSub")], rules:[t("rulesTitle"),t("rulesSub")], settings:[t("settingsTitle"),t("settingsSub")] };
   const nav: View[] = ["overview","logs","test","rules","services","models"];
   const protection=useMutation({mutationFn:(enabled:boolean)=>coreApi.savePolicy({...core.data!.policy,enabled}),onSuccess:()=>queryClient.invalidateQueries(),onError:error=>notify(String(error))});
   async function restartCore() {
+    if (restarting) return;
     if (!("__TAURI_INTERNALS__" in window)) {
       notify(t("desktopOnly"));
       return;
     }
+    setRestarting(true);
     try {
-      await invoke("stop_core");
-      await invoke("start_core", { address: new URL(connection.core()).host, proxyAddress: new URL(connection.proxy()).host, forwardProxyAddress: new URL(connection.forwardProxy()).host });
-      window.setTimeout(() => queryClient.invalidateQueries(), 600);
+      await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: new URL(connection.proxy()).host, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+      await new Promise(resolve => window.setTimeout(resolve, 600));
+      await queryClient.invalidateQueries({ queryKey: ["core"] }).catch(() => undefined);
+      notify(t("coreRestarted"));
     } catch (error) { notify(String(error)); }
+    finally { setRestarting(false); }
   }
   async function startWindowDrag(event: MouseEvent<HTMLElement>) {
     if (event.button !== 0 || !("__TAURI_INTERNALS__" in window)) return;
@@ -50,7 +55,7 @@ export function Shell() {
   return <div className="window-shell">
     <header className="titlebar" data-tauri-drag-region onMouseDown={startWindowDrag}><div className="brand" data-tauri-drag-region><strong data-tauri-drag-region>Remask</strong></div><div className="titlebar-drag" data-tauri-drag-region/>{!initialLoading&&<div className={`topbar-protection ${core.data?.policy.enabled?"topbar-protection--active":""}`}><ShieldCheck className="topbar-protection__icon" size={13}/><span>{core.data?.policy.enabled?t("protectionOn"):t("protectionOff")}</span><Switch ariaLabel={t("globalProtection")} disabled={!connected||protection.isPending} checked={core.data?.policy.enabled??false} onCheckedChange={enabled=>protection.mutate(enabled)}/></div>}</header>
     <div className="app-frame"><aside className="sidebar"><nav>{nav.map((item) => { const Icon=icons[item]; const label=item==="rules"?t("rulesNav"):item==="test"?t("localTest"):t(item); return <button key={item} title={label} aria-label={label} className={`nav-item ${view===item?"nav-item--active":""}`} onClick={() => setView(item)}><Icon size={15}/><span>{label}</span></button>; })}</nav><div className="sidebar__bottom"><button title={t("settings")} aria-label={t("settings")} className={`nav-item ${view==="settings"?"nav-item--active":""}`} onClick={()=>setView("settings")}><Settings size={15}/><span>{t("settings")}</span></button></div></aside>
-      <main className={view==="overview"?"main--headerless":""}>{view!=="overview"&&<header className="page-header"><div><h1>{meta[view][0]}</h1><p>{meta[view][1]}</p></div>{view==="test"?<span className="local-only-badge"><LockKeyhole size={11}/>{t("localOnly")}</span>:null}{view==="settings"&&<div className="page-header__actions"><Button variant="secondary" icon={<RefreshCw size={13}/>} onClick={restartCore}>{t("restart")}</Button></div>}</header>}<div className="page-content">{page}</div></main></div>
+      <main className={view==="overview"?"main--headerless":""}>{view!=="overview"&&<header className="page-header"><div><h1>{meta[view][0]}</h1><p>{meta[view][1]}</p></div>{view==="test"?<span className="local-only-badge"><LockKeyhole size={11}/>{t("localOnly")}</span>:null}{view==="settings"&&<div className="page-header__actions"><Button variant="secondary" disabled={restarting} icon={<RefreshCw size={13}/>} onClick={restartCore}>{t(restarting ? "restarting" : "restart")}</Button></div>}</header>}<div className="page-content">{page}</div></main></div>
     <footer className="statusbar">{!initialLoading&&<><span><StatusDot tone={connected?"success":"muted"}/>{connected?t("coreOnline"):t("coreOffline")}</span><span className="spacer"/><span><code>remask-core</code> {core.data?.version.version||"—"}</span></>}</footer><Toast message={toast}/>
   </div>;
 }

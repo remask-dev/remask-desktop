@@ -66,11 +66,10 @@ export function SettingsView({ data }: { data: BootstrapData }) {
       const previousPort = connection.proxyPort();
       if (port === previousPort) return false;
       if ("__TAURI_INTERNALS__" in window) {
-        await invoke("stop_core");
         try {
-          await invoke("start_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${port}`, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${port}`, forwardProxyAddress: new URL(connection.forwardProxy()).host });
         } catch (error) {
-          await invoke("start_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${previousPort}`, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${previousPort}`, forwardProxyAddress: new URL(connection.forwardProxy()).host });
           throw error;
         }
       }

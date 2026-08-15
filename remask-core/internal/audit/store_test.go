@@ -72,6 +72,61 @@ func TestStoreInitializesSettingsFile(t *testing.T) {
 	}
 }
 
+func TestStoreUsesOneGenericExtraColumn(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.db.Query(`PRAGMA table_info(audit_entries)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if !columns["extra_json"] || columns["debug_request_json"] || columns["debug_response_json"] {
+		t.Fatalf("unexpected audit extra columns: %#v", columns)
+	}
+}
+
+func TestStoreWritesDebugExchangeDirectlyToExtraColumn(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultSettings()
+	settings.Debug = true
+	if err := store.Configure(settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(Entry{Debug: &DebugExchange{
+		Request:  DebugRequest{Method: "POST", URL: "/v1/chat/completions"},
+		Response: DebugResponse{Status: 200},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var extra string
+	if err := store.db.QueryRow(`SELECT extra_json FROM audit_entries LIMIT 1`).Scan(&extra); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(extra, `"debug"`) || !strings.Contains(extra, `"request"`) || !strings.Contains(extra, `"response"`) {
+		t.Fatalf("debug exchange should be stored directly in extra_json: %s", extra)
+	}
+	loaded := store.List(Query{Limit: 1})
+	if len(loaded) != 1 || loaded[0].Debug == nil || loaded[0].Debug.Response.Status != 200 {
+		t.Fatalf("debug exchange was not decoded from extra_json: %#v", loaded)
+	}
+}
+
 func TestStoreKeepsMetadataWhenContentDisabled(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

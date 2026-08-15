@@ -120,6 +120,7 @@ type Entry struct {
 	TokenUsage     TokenUsage     `json:"token_usage"`
 	Fields         []Field        `json:"fields,omitempty"`
 	Debug          *DebugExchange `json:"debug,omitempty"`
+	Extra          ExtraData      `json:"-"`
 	ErrorCode      string         `json:"error_code,omitempty"`
 }
 
@@ -243,8 +244,7 @@ func (s *Store) initialize() error {
 			token_total INTEGER NOT NULL,
 			token_cached INTEGER NOT NULL DEFAULT 0,
 			fields_json TEXT NOT NULL,
-			debug_request_json TEXT NOT NULL DEFAULT '',
-			debug_response_json TEXT NOT NULL DEFAULT '',
+			extra_json TEXT NOT NULL DEFAULT '',
 			error_code TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_audit_entries_timestamp ON audit_entries(timestamp DESC);
@@ -260,26 +260,6 @@ func (s *Store) initialize() error {
 	`)
 	if err != nil {
 		return err
-	}
-	// Additive schema update for databases created before cached-token logging.
-	// SQLite has no IF NOT EXISTS variant for ADD COLUMN, so ignore the
-	// duplicate-column error while preserving all existing audit records.
-	_, alterErr := s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN token_cached INTEGER NOT NULL DEFAULT 0`)
-	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
-		return alterErr
-	}
-	// Additive schema update for databases created before request model logging.
-	_, alterErr = s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN model TEXT NOT NULL DEFAULT ''`)
-	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
-		return alterErr
-	}
-	_, alterErr = s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN debug_request_json TEXT NOT NULL DEFAULT ''`)
-	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
-		return alterErr
-	}
-	_, alterErr = s.db.Exec(`ALTER TABLE audit_entries ADD COLUMN debug_response_json TEXT NOT NULL DEFAULT ''`)
-	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
-		return alterErr
 	}
 	return nil
 }
@@ -331,11 +311,7 @@ func (s *Store) Add(entry Entry) error {
 	if err != nil {
 		return err
 	}
-	debugRequest, err := marshalDebugPart(entry.Debug, true)
-	if err != nil {
-		return err
-	}
-	debugResponse, err := marshalDebugPart(entry.Debug, false)
+	extra, err := marshalExtra(entry)
 	if err != nil {
 		return err
 	}
@@ -347,12 +323,12 @@ func (s *Store) Add(entry Entry) error {
 	_, err = tx.Exec(`INSERT INTO audit_entries (
 		id, timestamp, upstream_id, profile_id, operation_id, model, protection_mode, method, path,
 		status_code, duration_ms, streaming, request_bytes, response_bytes, entity_count,
-		token_input, token_output, token_total, token_cached, fields_json, debug_request_json, debug_response_json, error_code
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.Timestamp.UTC().Format(timestampLayout), entry.UpstreamID, entry.ProfileID,
 		entry.OperationID, entry.Model, entry.ProtectionMode, entry.Method, entry.Path, entry.StatusCode,
 		entry.DurationMS, entry.Streaming, entry.RequestBytes, entry.ResponseBytes, entry.EntityCount,
-		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), debugRequest, debugResponse, entry.ErrorCode)
+		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), extra, entry.ErrorCode)
 	if err != nil {
 		return err
 	}
@@ -373,31 +349,51 @@ func (s *Store) Add(entry Entry) error {
 	return s.prune(time.Now().UTC())
 }
 
-func marshalDebugPart(exchange *DebugExchange, request bool) (string, error) {
-	if exchange == nil {
+type ExtraData map[string]any
+
+func marshalExtra(entry Entry) (string, error) {
+	extra := ExtraData{}
+	for key, value := range entry.Extra {
+		extra[key] = value
+	}
+	if entry.Debug != nil {
+		extra["request"] = entry.Debug.Request
+		extra["response"] = entry.Debug.Response
+	}
+	if len(extra) == 0 {
 		return "", nil
 	}
-	value := exchange.Response
-	if request {
-		data, err := json.Marshal(exchange.Request)
-		return string(data), err
-	}
-	data, err := json.Marshal(value)
+	data, err := json.Marshal(extra)
 	return string(data), err
 }
 
-func unmarshalDebugExchange(requestJSON, responseJSON string) *DebugExchange {
-	if requestJSON == "" && responseJSON == "" {
-		return nil
+func unmarshalExtra(extraJSON string) (ExtraData, *DebugExchange) {
+	if extraJSON == "" {
+		return nil, nil
 	}
-	exchange := &DebugExchange{}
-	if requestJSON != "" {
-		_ = json.Unmarshal([]byte(requestJSON), &exchange.Request)
+	var extra map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(extraJSON), &extra); err != nil {
+		return nil, nil
 	}
-	if responseJSON != "" {
-		_ = json.Unmarshal([]byte(responseJSON), &exchange.Response)
+	values := ExtraData{}
+	var debug DebugExchange
+	requestFound, responseFound := false, false
+	for key, data := range extra {
+		var value any
+		if json.Unmarshal(data, &value) == nil {
+			values[key] = value
+		}
+		switch key {
+		case "request":
+			requestFound = json.Unmarshal(data, &debug.Request) == nil
+		case "response":
+			responseFound = json.Unmarshal(data, &debug.Response) == nil
+		}
 	}
-	return exchange
+	if requestFound && responseFound {
+		return values, &debug
+	}
+	return values, nil
 }
 
 func (s *Store) List(query Query) []Entry {
@@ -423,7 +419,7 @@ func (s *Store) List(query Query) []Entry {
 	args = append(args, limit)
 	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
 		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
-		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, debug_request_json, debug_response_json, error_code
+		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
 		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
 	if err != nil {
 		return []Entry{}
@@ -432,16 +428,16 @@ func (s *Store) List(query Query) []Entry {
 	result := make([]Entry, 0, limit)
 	for rows.Next() {
 		var entry Entry
-		var timestamp, fields, debugRequest, debugResponse string
+		var timestamp, fields, extra string
 		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
 			&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
-			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &debugRequest, &debugResponse, &entry.ErrorCode); err != nil {
+			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &extra, &entry.ErrorCode); err != nil {
 			continue
 		}
 		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 		_ = json.Unmarshal([]byte(fields), &entry.Fields)
-		entry.Debug = unmarshalDebugExchange(debugRequest, debugResponse)
+		entry.Extra, entry.Debug = unmarshalExtra(extra)
 		sortFields(entry.Fields)
 		result = append(result, entry)
 	}
