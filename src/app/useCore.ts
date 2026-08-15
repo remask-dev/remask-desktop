@@ -20,6 +20,7 @@ export const queryKeys = {
   settings: ["core", "settings"] as const,
   stats: (range: AuditStatsRange) => ["core", "audit-stats", range] as const,
   logs: (query = "") => ["core", "audit-logs", query] as const,
+  log: (id: string) => ["core", "audit-log", id] as const,
 };
 
 export type CoreStatus = "starting" | "online" | "offline";
@@ -104,6 +105,11 @@ export function useOverviewData(range: AuditStatsRange) {
 export function useLogsData(query = "") {
   const online = useCoreOnline();
   return useQuery({ queryKey: queryKeys.logs(query), queryFn: () => coreApi.logs(query), enabled: online, initialData: [], initialDataUpdatedAt: 0 });
+}
+
+export function useLogDetailData(id: string) {
+  const online = useCoreOnline();
+  return useQuery({ queryKey: queryKeys.log(id), queryFn: () => coreApi.log(id), enabled: online && Boolean(id), staleTime: Infinity });
 }
 
 export function useServicesData() {

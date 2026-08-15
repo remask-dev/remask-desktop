@@ -1,4 +1,4 @@
-import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
+import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
 
 const trim = (value: string) => value.trim().replace(/\/$/, "");
 export const connection = {
@@ -188,14 +188,23 @@ function normalizeDebug(value: unknown): DebugExchange | undefined {
   };
 }
 
-function normalizeLogs(value: unknown): AuditLog[] {
-  return records(value).map((log) => ({
+function normalizeLogSummary(log: Record<string, unknown>): AuditLogSummary {
+  return {
     id: text(log.id), timestamp: text(log.timestamp), upstream_id: text(log.upstream_id), profile_id: text(log.profile_id), operation_id: text(log.operation_id),
     model: optionalText(log.model), protection_mode: log.protection_mode === "redacted" || log.protection_mode === "passthrough" || log.protection_mode === "disabled" ? log.protection_mode : undefined,
     method: text(log.method), path: text(log.path), status_code: number(log.status_code), duration_ms: number(log.duration_ms), streaming: boolean(log.streaming),
     request_bytes: number(log.request_bytes), response_bytes: number(log.response_bytes), entity_count: number(log.entity_count), token_usage: normalizeTokenUsage(log.token_usage),
-    fields: records(log.fields).map(normalizeAuditField), debug: normalizeDebug(log.debug), error_code: optionalText(log.error_code),
-  }));
+    error_code: optionalText(log.error_code),
+  };
+}
+
+function normalizeLogs(value: unknown): AuditLogSummary[] {
+  return records(value).map(normalizeLogSummary);
+}
+
+function normalizeLog(value: unknown): AuditLog {
+  const log = isRecord(value) ? value : {};
+  return { ...normalizeLogSummary(log), fields: records(log.fields).map(normalizeAuditField), debug: normalizeDebug(log.debug) };
 }
 
 export const coreApi = {
@@ -218,6 +227,7 @@ export const coreApi = {
   policy: async () => normalizePolicy(await request<unknown>("/api/v1/policy")),
   stats: async (range: AuditStatsRange) => normalizeStats(await request<unknown>(`/api/v1/audit/stats?range=${range}`)),
   logs: async (query = "") => { const raw = await request<unknown>(`/api/v1/audit/logs?limit=100${query}`); return normalizeLogs(isRecord(raw) ? raw.logs : undefined); },
+  log: async (id: string) => { const raw = await request<unknown>(`/api/v1/audit/logs/${encodeURIComponent(id)}`); return normalizeLog(isRecord(raw) ? raw.log : undefined); },
   clearLogs: () => request<void>("/api/v1/audit/logs", { method: "DELETE" }),
   redact: async (source: string) => { const raw = await request<unknown>("/api/v1/redact", { method: "POST", body: JSON.stringify({ text: source }) }); const value = isRecord(raw) ? raw : {}; return { text: text(value.text, source), scope_id: text(value.scope_id), replacement_count: number(value.replacement_count), entities: records(value.entities).map(normalizePIIEntity) } satisfies RedactResult; },
   saveSettings: async (audit: AuditSettings) => { const raw = await request<unknown>("/api/v1/settings", { method: "PUT", body: JSON.stringify({ audit, models: { hf_base_url: audit.hf_base_url || "" } }) }); return { audit: normalizeAuditSettings(isRecord(raw) ? raw.audit : undefined) }; },

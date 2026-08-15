@@ -12,7 +12,8 @@ export interface TokenUsage { input: number; output: number; total: number; cach
 export interface DebugRequest { method: string; url: string; headers?: Record<string, string[]>; body?: string }
 export interface DebugResponse { status: number; headers?: Record<string, string[]>; body?: string }
 export interface DebugExchange { request: DebugRequest; response: DebugResponse }
-export interface AuditLog { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; model?: string; protection_mode?: "redacted" | "passthrough" | "disabled"; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; fields?: AuditField[]; debug?: DebugExchange; error_code?: string }
+export interface AuditLogSummary { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; model?: string; protection_mode?: "redacted" | "passthrough" | "disabled"; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; error_code?: string }
+export interface AuditLog extends AuditLogSummary { fields?: AuditField[]; debug?: DebugExchange }
 export interface DailyStat { date: string; requests: number; entities: number }
 export type AuditStatsRange = "today" | "yesterday" | "7d" | "30d";
 export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[]; token_input: number; token_output: number; token_total: number; token_cached: number; tokens_per_minute: number; granularity?: "hour" | "day" }
