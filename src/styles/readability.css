@@ -91,14 +91,7 @@ body {
 }
 
 .sidebar .nav-item--active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: #2f628f;
+  display: none;
 }
 
 .sidebar .nav-item--active svg {
@@ -205,11 +198,87 @@ main {
 
 /* Overview: preserve density while making every label legible. */
 .trust-strip {
-  min-height: 88px;
+  min-height: 116px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 8px;
 }
 
 .trust-strip__title {
+  margin-right: 0;
   font-size: var(--font-label);
+}
+
+.trust-strip__topline {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid #e9edf2;
+}
+
+.overview-gateway-addresses {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.overview-gateway-address {
+  min-width: 0;
+  max-width: 300px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #8491a0;
+  background: #f5f7fa;
+  font-size: var(--font-utility);
+  transition: color .14s, background-color .14s;
+}
+
+.overview-gateway-address:hover {
+  color: #66798b;
+  background: rgba(232, 237, 243, .62);
+}
+
+.overview-gateway-address span,
+.overview-gateway-address svg {
+  flex: 0 0 auto;
+}
+
+.overview-gateway-address span {
+  color: #4d6276;
+  font-weight: 650;
+}
+
+.overview-gateway-address svg {
+  color: #9ba7b3;
+  opacity: .72;
+}
+
+.overview-gateway-address code {
+  min-width: 0;
+  overflow: hidden;
+  color: #82909f;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-gateway-address:hover code {
+  color: #687b8d;
+}
+
+.protection-node--gateway::after {
+  display: none;
 }
 
 .trust-step small,
@@ -259,6 +328,25 @@ main {
 .recent-table button,
 .recent-table code {
   font-size: var(--font-utility);
+}
+
+.overview-workspace--compact .chart-surface {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) 18px;
+  gap: 9px;
+  padding-bottom: 17px;
+}
+
+.overview-workspace--compact .chart-surface .chart {
+  height: auto;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.chart-legend {
+  min-height: 18px;
+  align-items: center;
+  padding-right: 2px;
 }
 
 .overview-range-trigger,
@@ -334,6 +422,21 @@ main {
   font-size: var(--font-utility);
 }
 
+.logs-page .request-list > button {
+  min-height: 72px;
+}
+
+.logs-page .request-list strong {
+  font-size: 10.5px;
+}
+
+.logs-page .request-list code,
+.logs-page .request-list time,
+.logs-page .request-list small,
+.logs-page .request-list__route > span {
+  font-size: 8.5px;
+}
+
 .service-list > button > span[class*="text-"] {
   font-size: var(--font-utility);
 }
@@ -380,6 +483,95 @@ main {
 .audit-field pre,
 .debug-part pre {
   line-height: 1.6;
+}
+
+/* Request inspection stays deliberately compact, like an audit console. */
+.logs-view .detail-header {
+  min-height: 76px;
+  padding-block: 12px;
+}
+
+.logs-view .detail-header span,
+.logs-view .detail-header code,
+.logs-view .detail-section--summary .property-grid dt,
+.logs-view .audit-field section > span,
+.logs-view .debug-part > section > span {
+  font-size: 8px;
+}
+
+.logs-view .detail-header h2 {
+  font-size: 14px;
+}
+
+.logs-view .detail-section {
+  padding-block: 12px;
+}
+
+.logs-view .detail-section > h3,
+.logs-view .warning-callout strong,
+.logs-view .warning-callout p,
+.logs-view .audit-field > summary,
+.logs-view .audit-field pre,
+.logs-view .debug-part > header,
+.logs-view .debug-part pre {
+  font-size: 9px;
+}
+
+.logs-view .detail-section--summary .property-grid dd {
+  font-size: 9.5px;
+}
+
+.logs-view .detail-section--summary .property-grid > div {
+  min-height: 44px;
+}
+
+.logs-view .badge {
+  font-size: 8px;
+}
+
+.logs-view .audit-field > summary {
+  min-height: 32px;
+}
+
+.logs-view .debug-exchange--collapsible {
+  padding: 0;
+}
+
+.logs-view .debug-exchange--collapsible > summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  color: #657386;
+  font-size: 9px;
+  font-weight: 630;
+  cursor: pointer;
+  list-style: none;
+}
+
+.logs-view .debug-exchange--collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.logs-view .debug-exchange--collapsible > summary::before {
+  content: "›";
+  color: #8a97a6;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform .15s;
+}
+
+.logs-view .debug-exchange--collapsible[open] > summary {
+  border-bottom: 1px solid #e2e8ef;
+}
+
+.logs-view .debug-exchange--collapsible[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.logs-view .debug-exchange__body {
+  padding: 12px 18px;
 }
 
 /* Services, models, settings, and rules */
@@ -583,9 +775,25 @@ main {
     display: none;
   }
 
-  .sidebar .nav-item--active::before {
-    top: 11px;
-    bottom: 11px;
+  .trust-strip__topline {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .overview-gateway-address {
+    width: 100%;
+    max-width: none;
+  }
+
+  .overview-gateway-addresses {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .overview-gateway-addresses {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

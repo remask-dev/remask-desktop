@@ -210,21 +210,20 @@ fn spawn_core(
     let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
     let remask_dir = home_dir.join(".remask");
     std::fs::create_dir_all(&remask_dir).map_err(|error| error.to_string())?;
-    // Bundled models are the initial seed; downloaded models must live in the
-    // writable per-user directory rather than inside the application bundle.
+    // Downloaded models live in the writable per-user directory. Bundled
+    // models stay in the application resources and are scanned read-only, so
+    // startup never duplicates the large model files into the user's home.
     let models_dir = remask_dir.join("models");
-    if !models_dir.exists() {
-        if let Err(error) = copy_dir_all(&bundled_resources.join("models"), &models_dir) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(error.to_string());
-            }
-            std::fs::create_dir_all(&models_dir).map_err(|error| error.to_string())?;
-        }
-    }
+    std::fs::create_dir_all(&models_dir).map_err(|error| error.to_string())?;
     args.push("--data-dir".to_string());
     args.push(remask_dir.to_string_lossy().into_owned());
     args.push("--models-dir".to_string());
     args.push(models_dir.to_string_lossy().into_owned());
+    let builtin_models_dir = bundled_resources.join("models");
+    if builtin_models_dir.is_dir() {
+        args.push("--builtin-models-dir".to_string());
+        args.push(builtin_models_dir.to_string_lossy().into_owned());
+    }
     if let Some(runtime_library) = find_runtime_library(&bundled_resources) {
         args.push("--onnxruntime-lib".to_string());
         args.push(runtime_library.to_string_lossy().into_owned());
@@ -281,20 +280,6 @@ fn spawn_core(
             }
         }
     });
-    Ok(())
-}
-
-fn copy_dir_all(source: &Path, destination: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let target = destination.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_all(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), target)?;
-        }
-    }
     Ok(())
 }
 

@@ -38,7 +38,7 @@ REMASK_ONNXRUNTIME_LIBRARY=/absolute/path/to/libonnxruntime.dylib npm run stage:
 npm run tauri build
 ```
 
-Set `TARGET_TRIPLE` when cross-compiling. By default the staging script bundles `openai-privacy-filter-q4`. Override this through `REMASK_MODEL_IDS` and `REMASK_ACTIVE_MODEL`. The shell passes `--models-dir` and `--onnxruntime-lib`, then activates the selected bundled model before serving requests.
+Set `TARGET_TRIPLE` when cross-compiling. By default the staging script bundles `openai-privacy-filter-q4`. Override this through `REMASK_MODEL_IDS` and `REMASK_ACTIVE_MODEL`. The shell scans bundled models in place through `--builtin-models-dir`, keeps downloads in the user `--models-dir`, and passes `--onnxruntime-lib` before activating the selected model. Bundled models are read-only and are not copied into the user's home directory.
 
 The Core selects the platform GPU provider automatically. Override it with `REMASK_ONNX_PROVIDER` (`coreml`, `directml`, `cuda`, `tensorrt`, `rocm`, `openvino`, or `cpu`) and `REMASK_ONNX_DEVICE` when launching the desktop app or sidecar. The runtime bundle must include provider companion libraries for CUDA/ROCm/OpenVINO/DirectML; `stage:core` copies these files from the same directory as `REMASK_ONNXRUNTIME_LIBRARY`.
 

@@ -4,7 +4,7 @@ export interface ProxyCAStatus { ready: boolean; certificate_path?: string; fing
 export interface Profile { id: string; name: string; operations: unknown[]; header_templates?: Record<string, string> }
 export interface Upstream { id: string; base_url: string; profile_id: string; credential_mode: "passthrough" | "managed"; api_key?: string; header_templates?: Record<string, string> }
 export interface ModelManifest { name: string; version: string; quantization: string; max_tokens: number; stride: number; label_scheme: string; entity_types?: Record<string, string> }
-export interface ModelPackage { id: string; valid: boolean; active: boolean; manifest: ModelManifest; errors: string[] }
+export interface ModelPackage { id: string; valid: boolean; active: boolean; built_in: boolean; manifest: ModelManifest; errors: string[] }
 export interface ActiveModel { id: string; name: string; version: string; runtime: string; quantization: string }
 export interface AuditEntity { type: string; replacement: string; masked?: string; confidence: number; sources?: string[] }
 export interface AuditField { path: string; original_masked: string; redacted: string; entities: AuditEntity[] | null }
