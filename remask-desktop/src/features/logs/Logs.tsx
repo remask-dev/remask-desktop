@@ -1,10 +1,10 @@
 import { Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { AuditEntity, AuditLog } from "../../shared/api/types";
+import type { AuditEntity, AuditLog, AuditLogSummary } from "../../shared/api/types";
 import { useI18n } from "../../shared/i18n/I18n";
 import { Badge, StatusDot } from "../../shared/ui/Status";
 import { Input } from "../../shared/ui/Input";
-import { useLogsData } from "../../app/useCore";
+import { useLogDetailData, useLogsData } from "../../app/useCore";
 import { PageState } from "../../shared/ui/PageState";
 
 export function Logs() {
@@ -14,11 +14,11 @@ export function Logs() {
   return <LogsContent logs={logsQuery.data} t={t} dateLocale={dateLocale}/>;
 }
 
-function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLog[]; t: ReturnType<typeof useI18n>["t"]; dateLocale: string }) {
+function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLogSummary[]; t: ReturnType<typeof useI18n>["t"]; dateLocale: string }) {
   const [query, setQuery] = useState("");
   const [date, setDate] = useState("");
   const [provider, setProvider] = useState("all");
-  const [selected, setSelected] = useState(sourceLogs[0]?.id || "");
+  const [selected, setSelected] = useState("");
   const providers = useMemo(() => uniqueValues(sourceLogs.map((log) => log.upstream_id)), [sourceLogs]);
   const logs = useMemo(() => sourceLogs.filter((log) => {
     const searchable = (log.upstream_id + (log.model ?? "") + log.path).toLowerCase();
@@ -26,7 +26,8 @@ function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLog[]; t:
       (!date || localDateKey(log.timestamp) === date) &&
       (provider === "all" || log.upstream_id === provider);
   }), [sourceLogs, query, date, provider]);
-  const item = logs.find((log) => log.id === selected) || logs[0];
+  const item = logs.find((log) => log.id === selected);
+  const detailQuery = useLogDetailData(item?.id ?? "");
   const hasFilters = Boolean(date) || provider !== "all";
 
   return <div className="logs-page">
@@ -40,7 +41,7 @@ function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLog[]; t:
     </div>
     <div className="split-view logs-view">
       <section className="list-pane"><div className="request-list">{logs.map((log) => <button key={log.id} className={item?.id === log.id ? "selected" : ""} onClick={() => setSelected(log.id)}><div><StatusDot tone={isPass(log) ? "warning" : "success"}/><strong>{log.upstream_id}</strong><time>{new Date(log.timestamp).toLocaleString(dateLocale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time></div><div className="request-list__route"><code>{log.method} {log.path}</code><span title={log.model}>{log.model || "—"}</span></div><small><span>{log.entity_count} {t("entities")}{log.token_usage?.total ? ` · ${log.token_usage.total} ${t("tokens")}` : ""}</span><span>{log.status_code} · {log.duration_ms} ms{log.streaming ? " · SSE" : ""}</span></small></button>)}</div></section>
-      <section className="detail-pane">{item ? <LogDetail item={item}/> : <div className="detail-empty"><FileIcon/><h2>{t("selectRequest")}</h2><p>{t("selectRequestSub")}</p></div>}</section>
+      <section className="detail-pane">{item ? (detailQuery.isPending ? <PageState pending error={detailQuery.error}/> : detailQuery.data ? <LogDetail item={detailQuery.data}/> : <PageState pending={false} error={detailQuery.error} onRetry={() => void detailQuery.refetch()}/>) : <div className="detail-empty"><FileIcon/><h2>{t("selectRequest")}</h2><p>{t("selectRequestSub")}</p></div>}</section>
     </div>
   </div>;
 }

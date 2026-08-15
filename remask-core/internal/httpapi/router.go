@@ -76,6 +76,7 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 	mux.HandleFunc("GET /api/v1/operations/{operation_id}", router.getOperation)
 	mux.HandleFunc("DELETE /api/v1/operations/{operation_id}", router.cancelOperation)
 	mux.HandleFunc("GET /api/v1/audit/logs", router.listAuditLogs)
+	mux.HandleFunc("GET /api/v1/audit/logs/{log_id}", router.getAuditLog)
 	mux.HandleFunc("DELETE /api/v1/audit/logs", router.clearAuditLogs)
 	mux.HandleFunc("GET /api/v1/audit/stats", router.auditStats)
 	mux.HandleFunc("GET /api/v1/settings", router.getSettings)
@@ -290,7 +291,16 @@ func (r *Router) listAuditLogs(w http.ResponseWriter, request *http.Request) {
 		limit = parsed
 	}
 	query := audit.Query{Limit: limit, UpstreamID: request.URL.Query().Get("upstream_id"), Status: request.URL.Query().Get("status"), Search: request.URL.Query().Get("search")}
-	writeJSON(w, http.StatusOK, map[string]any{"logs": r.audits.List(query)})
+	writeJSON(w, http.StatusOK, map[string]any{"logs": r.audits.ListSummaries(query)})
+}
+
+func (r *Router) getAuditLog(w http.ResponseWriter, request *http.Request) {
+	item, ok := r.audits.Get(request.PathValue("log_id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "AUDIT_LOG_NOT_FOUND", "request log not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"log": item})
 }
 
 func (r *Router) clearAuditLogs(w http.ResponseWriter, _ *http.Request) {

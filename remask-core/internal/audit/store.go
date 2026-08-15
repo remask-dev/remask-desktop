@@ -444,6 +444,78 @@ func (s *Store) List(query Query) []Entry {
 	return result
 }
 
+// ListSummaries returns only the columns needed by the audit log list. Large
+// field previews and debug exchanges stay in SQLite until a specific entry is
+// opened through Get.
+func (s *Store) ListSummaries(query Query) []Entry {
+	limit := query.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	clauses := []string{"1 = 1"}
+	args := make([]any, 0, 5)
+	if query.UpstreamID != "" {
+		clauses = append(clauses, "upstream_id = ?")
+		args = append(args, query.UpstreamID)
+	}
+	if query.Status == "success" {
+		clauses = append(clauses, "status_code >= 200 AND status_code < 400")
+	} else if query.Status == "error" {
+		clauses = append(clauses, "(status_code < 200 OR status_code >= 400)")
+	}
+	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
+		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
+		args = append(args, "%"+search+"%")
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
+		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
+		response_bytes, entity_count, token_input, token_output, token_total, token_cached, error_code
+		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
+	if err != nil {
+		return []Entry{}
+	}
+	defer rows.Close()
+	result := make([]Entry, 0, limit)
+	for rows.Next() {
+		var entry Entry
+		var timestamp string
+		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
+			&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
+			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
+			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &entry.ErrorCode); err != nil {
+			continue
+		}
+		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
+		result = append(result, entry)
+	}
+	return result
+}
+
+// Get loads the complete audit entry, including field previews and any debug
+// exchange. It is intentionally separate from ListSummaries so list navigation
+// never pays the cost of decoding large request and response bodies.
+func (s *Store) Get(id string) (Entry, bool) {
+	var entry Entry
+	var timestamp, fields, extra string
+	err := s.db.QueryRow(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
+		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
+		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
+		FROM audit_entries WHERE id = ?`, id).Scan(
+		&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
+		&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
+		&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
+		&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &extra, &entry.ErrorCode)
+	if err != nil {
+		return Entry{}, false
+	}
+	entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
+	_ = json.Unmarshal([]byte(fields), &entry.Fields)
+	entry.Extra, entry.Debug = unmarshalExtra(extra)
+	sortFields(entry.Fields)
+	return entry, true
+}
+
 func (s *Store) Clear() error {
 	_, err := s.db.Exec(`DELETE FROM audit_entries`)
 	return err

@@ -127,6 +127,43 @@ func TestStoreWritesDebugExchangeDirectlyToExtraColumn(t *testing.T) {
 	}
 }
 
+func TestStoreListsMetadataAndLoadsContentOnDemand(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultSettings()
+	settings.Debug = true
+	if err := store.Configure(settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(Entry{
+		UpstreamID: "openai",
+		Fields:     []Field{{Path: "/messages/0/content", OriginalMasked: "masked", Redacted: "redacted"}},
+		Debug: &DebugExchange{
+			Request:  DebugRequest{Method: "POST", Body: "complete request"},
+			Response: DebugResponse{Status: 200, Body: "complete response"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries := store.ListSummaries(Query{Limit: 10})
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %#v", summaries)
+	}
+	if len(summaries[0].Fields) != 0 || summaries[0].Debug != nil || summaries[0].Extra != nil {
+		t.Fatalf("list summary loaded detail content: %#v", summaries[0])
+	}
+	detail, ok := store.Get(summaries[0].ID)
+	if !ok || len(detail.Fields) != 1 || detail.Debug == nil || detail.Debug.Response.Body != "complete response" {
+		t.Fatalf("detail = %#v, found = %v", detail, ok)
+	}
+	if _, ok := store.Get("missing"); ok {
+		t.Fatal("missing audit entry was reported as found")
+	}
+}
+
 func TestStoreKeepsMetadataWhenContentDisabled(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

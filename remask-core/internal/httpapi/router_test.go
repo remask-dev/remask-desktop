@@ -98,8 +98,22 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 		t.Fatalf("logs response: %d %s", logsResponse.Code, logsResponse.Body.String())
 	}
 	logsBody := logsResponse.Body.String()
-	if strings.Contains(logsBody, "foo@example.com") || !strings.Contains(logsBody, "foo***com") || !strings.Contains(logsBody, `\u003cMASK_EMAIL:`) {
-		t.Fatalf("audit log was not safely masked: %s", logsBody)
+	if strings.Contains(logsBody, "foo@example.com") || strings.Contains(logsBody, "foo***com") || strings.Contains(logsBody, `MASK_EMAIL`) || strings.Contains(logsBody, `"fields"`) {
+		t.Fatalf("audit list included request content: %s", logsBody)
+	}
+	var listed struct {
+		Logs []struct {
+			ID string `json:"id"`
+		} `json:"logs"`
+	}
+	if err := json.Unmarshal(logsResponse.Body.Bytes(), &listed); err != nil || len(listed.Logs) != 1 {
+		t.Fatalf("decode audit list: %v body=%s", err, logsBody)
+	}
+	detailResponse := httptest.NewRecorder()
+	handler.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs/"+listed.Logs[0].ID, nil))
+	detailBody := detailResponse.Body.String()
+	if detailResponse.Code != http.StatusOK || strings.Contains(detailBody, "foo@example.com") || !strings.Contains(detailBody, "foo***com") || !strings.Contains(detailBody, `\u003cMASK_EMAIL:`) {
+		t.Fatalf("audit detail was not safely masked: %d %s", detailResponse.Code, detailBody)
 	}
 }
 
@@ -138,9 +152,23 @@ func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
 	}
 	logsResponse := httptest.NewRecorder()
 	handler.ServeHTTP(logsResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs", nil))
-	if logsResponse.Code != http.StatusOK || !strings.Contains(logsResponse.Body.String(), `"debug":{"request"`) ||
-		!strings.Contains(logsResponse.Body.String(), "debug@example.com") || !strings.Contains(logsResponse.Body.String(), "debug response") {
-		t.Fatalf("debug exchange was not persisted: %d %s", logsResponse.Code, logsResponse.Body.String())
+	if logsResponse.Code != http.StatusOK || strings.Contains(logsResponse.Body.String(), `"debug"`) ||
+		strings.Contains(logsResponse.Body.String(), "debug@example.com") || strings.Contains(logsResponse.Body.String(), "debug response") {
+		t.Fatalf("audit list included debug exchange: %d %s", logsResponse.Code, logsResponse.Body.String())
+	}
+	var listed struct {
+		Logs []struct {
+			ID string `json:"id"`
+		} `json:"logs"`
+	}
+	if err := json.Unmarshal(logsResponse.Body.Bytes(), &listed); err != nil || len(listed.Logs) != 1 {
+		t.Fatalf("decode audit list: %v body=%s", err, logsResponse.Body.String())
+	}
+	detailResponse := httptest.NewRecorder()
+	handler.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs/"+listed.Logs[0].ID, nil))
+	if detailResponse.Code != http.StatusOK || !strings.Contains(detailResponse.Body.String(), `"debug":{"request"`) ||
+		!strings.Contains(detailResponse.Body.String(), "debug@example.com") || !strings.Contains(detailResponse.Body.String(), "debug response") {
+		t.Fatalf("debug exchange was not persisted: %d %s", detailResponse.Code, detailResponse.Body.String())
 	}
 }
 
