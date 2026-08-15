@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -19,7 +19,86 @@ mod system_integration;
 /// hides it to the tray instead of exiting, unless a real quit is in progress.
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
-struct CoreProcess(Mutex<Option<CommandChild>>);
+struct CoreProcess(Mutex<Option<ManagedCoreProcess>>);
+
+struct ManagedCoreProcess {
+    child: CommandChild,
+    #[cfg(target_os = "windows")]
+    _kill_on_close_job: Option<WindowsKillOnCloseJob>,
+}
+
+impl ManagedCoreProcess {
+    fn pid(&self) -> u32 {
+        self.child.pid()
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsKillOnCloseJob(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(target_os = "windows")]
+unsafe impl Send for WindowsKillOnCloseJob {}
+
+#[cfg(target_os = "windows")]
+impl Drop for WindowsKillOnCloseJob {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn create_kill_on_close_job(pid: u32) -> Result<WindowsKillOnCloseJob, String> {
+    use std::mem::size_of;
+    use std::ptr::null;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(null(), null());
+        if job.is_null() {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&raw const limits).cast(),
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) == 0
+        {
+            let error = std::io::Error::last_os_error().to_string();
+            CloseHandle(job);
+            return Err(error);
+        }
+
+        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+        if process.is_null() {
+            let error = std::io::Error::last_os_error().to_string();
+            CloseHandle(job);
+            return Err(error);
+        }
+        let assigned = AssignProcessToJobObject(job, process);
+        let assignment_error = (assigned == 0).then(|| std::io::Error::last_os_error().to_string());
+        CloseHandle(process);
+        if let Some(error) = assignment_error {
+            CloseHandle(job);
+            return Err(error);
+        }
+
+        Ok(WindowsKillOnCloseJob(job))
+    }
+}
 
 #[tauri::command]
 fn append_client_log(app: AppHandle, entry: String) -> Result<(), String> {
@@ -158,7 +237,19 @@ fn spawn_core(
         .args(args);
     let (mut events, child) = command.spawn().map_err(|error| error.to_string())?;
     let pid = child.pid();
-    *process = Some(child);
+    #[cfg(target_os = "windows")]
+    let kill_on_close_job = match create_kill_on_close_job(pid) {
+        Ok(job) => Some(job),
+        Err(error) => {
+            eprintln!("failed to bind remask-core to the desktop process: {error}");
+            None
+        }
+    };
+    *process = Some(ManagedCoreProcess {
+        child,
+        #[cfg(target_os = "windows")]
+        _kill_on_close_job: kill_on_close_job,
+    });
     drop(process);
 
     let app_handle = app.clone();
@@ -181,7 +272,7 @@ fn spawn_core(
                     );
                     let state = app_handle.state::<CoreProcess>();
                     if let Ok(mut current) = state.0.lock() {
-                        if current.as_ref().is_some_and(|child| child.pid() == pid) {
+                        if current.as_ref().is_some_and(|process| process.pid() == pid) {
                             current.take();
                         }
                     };
@@ -227,8 +318,8 @@ fn stop_core(state: State<'_, CoreProcess>) -> Result<(), String> {
 
 fn stop_core_process(state: &CoreProcess) -> Result<bool, String> {
     let mut process = state.0.lock().map_err(|_| "core process lock poisoned")?;
-    if let Some(child) = process.take() {
-        child.kill().map_err(|error| error.to_string())?;
+    if let Some(process) = process.take() {
+        process.child.kill().map_err(|error| error.to_string())?;
         return Ok(true);
     }
     Ok(false)
@@ -346,6 +437,9 @@ pub fn run() {
                     "show" => show_main_window(app),
                     "quit" => {
                         QUITTING.store(true, Ordering::Relaxed);
+                        if let Err(error) = stop_core_process(app.state::<CoreProcess>().inner()) {
+                            eprintln!("failed to stop remask-core before exit: {error}");
+                        }
                         app.exit(0);
                     }
                     _ => {}
@@ -374,15 +468,21 @@ pub fn run() {
                 window.unminimize()?;
                 window.set_focus()?;
             }
-            if let Err(error) = spawn_core(
-                app.handle(),
-                app.state::<CoreProcess>().inner(),
-                "127.0.0.1:17680",
-                "127.0.0.1:17681",
-                "127.0.0.1:17682",
-            ) {
-                eprintln!("failed to start remask-core: {error}");
-            }
+            // Preparing the writable model directory can be expensive on a
+            // first launch. Do it off the setup thread so the webview can
+            // render the complete client immediately, independently of Core.
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = spawn_core(
+                    &app_handle,
+                    app_handle.state::<CoreProcess>().inner(),
+                    "127.0.0.1:17680",
+                    "127.0.0.1:17681",
+                    "127.0.0.1:17682",
+                ) {
+                    eprintln!("failed to start remask-core: {error}");
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -405,8 +505,15 @@ pub fn run() {
             install_system_certificate,
             launch_ai_client
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running remask-desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building remask-desktop")
+        .run(|app, event| {
+            if matches!(event, RunEvent::Exit) {
+                if let Err(error) = stop_core_process(app.state::<CoreProcess>().inner()) {
+                    eprintln!("failed to stop remask-core during exit: {error}");
+                }
+            }
+        });
 }
 
 fn show_main_window(app: &AppHandle) {

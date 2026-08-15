@@ -21,6 +21,14 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-shell = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
 # Patch tray-icon so the macOS menu-bar icon renders at the full 22pt bar
 # height instead of the crate's hardcoded 18pt (vendor/tray-icon).
 [patch.crates-io]
