@@ -5,6 +5,7 @@
 @import "./features.css";
 @import "./details.css";
 @import "./refinement.css";
+@import "./readability.css";
 
 @theme inline {
   --color-background: var(--background);

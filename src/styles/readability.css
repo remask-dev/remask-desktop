@@ -1,0 +1,602 @@
+/*
+ * Readability pass
+ *
+ * Remask is a desktop control surface, so dense information still needs to be
+ * scannable at arm's length. Keep the porcelain / blue-grey visual language,
+ * but enforce a practical type floor and give navigation an opaque anchor.
+ */
+:root {
+  --font-utility: 10px;
+  --font-caption: 11px;
+  --font-body: 12px;
+  --font-label: 12.5px;
+  --font-section: 13px;
+  --sidebar: #eaf0f6;
+  --faint: #718094;
+  --muted-foreground: #596a7d;
+}
+
+body {
+  font-size: var(--font-body);
+  line-height: 1.45;
+}
+
+/* Window chrome and persistent navigation */
+.window-shell {
+  --sidebar-width: 190px;
+  grid-template-rows: 50px minmax(0, 1fr) 28px;
+}
+
+.titlebar {
+  background: rgba(248, 250, 253, .94);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.brand {
+  font-size: 14px;
+}
+
+.topbar-protection,
+.core-indicator {
+  font-size: var(--font-caption);
+  font-weight: 550;
+}
+
+.topbar-protection {
+  height: 32px;
+  gap: 7px;
+  padding-inline: 8px 4px;
+}
+
+.sidebar {
+  padding: 16px 10px 11px;
+  border-right: 1px solid #d2dce7;
+  background: linear-gradient(180deg, #edf2f7 0%, #e8eef5 100%);
+  box-shadow: 6px 0 22px rgba(31, 54, 79, .035);
+}
+
+.sidebar nav {
+  gap: 5px;
+}
+
+.sidebar .nav-item {
+  position: relative;
+  height: 42px;
+  grid-template-columns: 27px minmax(0, 1fr);
+  padding: 0 12px;
+  border-radius: 9px;
+  color: #46596e;
+  font-size: var(--font-label);
+  font-weight: 540;
+  letter-spacing: -.05px;
+}
+
+.sidebar .nav-item svg {
+  width: 17px;
+  height: 17px;
+  color: #65778a;
+  stroke-width: 1.85;
+}
+
+.sidebar .nav-item:hover {
+  color: #20364d;
+  background: #e0e7ef;
+}
+
+.sidebar .nav-item--active {
+  color: #173f69;
+  background: #fff;
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgba(28, 50, 75, .06), 0 6px 18px rgba(28, 50, 75, .055);
+}
+
+.sidebar .nav-item--active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #2f628f;
+}
+
+.sidebar .nav-item--active svg {
+  color: #285a86;
+}
+
+.sidebar__bottom {
+  padding-top: 10px;
+  border-top: 1px solid rgba(92, 113, 136, .16);
+}
+
+.statusbar,
+.statusbar code {
+  font-size: var(--font-utility);
+}
+
+.statusbar {
+  color: #5e6e80;
+  background: #e7edf4;
+}
+
+/* Page hierarchy */
+main {
+  grid-template-rows: 70px minmax(0, 1fr);
+}
+
+.page-header h1 {
+  font-size: 17px;
+  font-weight: 680;
+}
+
+.page-header p {
+  margin-top: 5px;
+  color: #617286;
+  font-size: var(--font-caption);
+}
+
+.empty-page h2,
+.detail-empty h2 {
+  font-size: 15px;
+}
+
+.empty-page p,
+.detail-empty p {
+  font-size: var(--font-caption);
+}
+
+/* Shared controls */
+.button {
+  min-height: 34px;
+  height: 34px;
+  padding-inline: 13px;
+  font-size: 11.5px;
+}
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+}
+
+.badge {
+  padding: 4px 7px;
+  font-size: var(--font-utility);
+}
+
+.segmented button {
+  height: 29px;
+  font-size: var(--font-caption);
+}
+
+.section-title h2,
+.section-title h3 {
+  font-size: var(--font-section);
+}
+
+.section-title p,
+.inline-empty {
+  font-size: var(--font-caption);
+}
+
+.toast {
+  padding: 10px 13px;
+  font-size: var(--font-body);
+}
+
+.dialog h2 {
+  font-size: 15px;
+}
+
+.dialog header p,
+.dialog-message,
+.field > span,
+.credential-note {
+  font-size: var(--font-caption);
+}
+
+.field input,
+.field select,
+.setting-row input,
+.setting-row select {
+  height: 36px;
+  font-size: var(--font-body);
+}
+
+/* Overview: preserve density while making every label legible. */
+.trust-strip {
+  min-height: 88px;
+}
+
+.trust-strip__title {
+  font-size: var(--font-label);
+}
+
+.trust-step small,
+.proxy-chip small,
+.protection-node small {
+  font-size: var(--font-utility);
+}
+
+.trust-step strong,
+.proxy-chip code,
+.protection-node strong,
+.protection-node__address code {
+  font-size: var(--font-caption);
+}
+
+.protection-node {
+  min-height: 56px;
+}
+
+.metric {
+  min-height: 108px;
+}
+
+.metric > span {
+  color: #57687b;
+  font-size: var(--font-caption);
+  font-weight: 560;
+}
+
+.metric strong {
+  font-size: 27px;
+}
+
+.metric strong em,
+.metric small {
+  font-size: var(--font-utility);
+}
+
+.chart-column span {
+  color: #6d7c8d;
+  font-size: 9px;
+}
+
+.chart-legend,
+.distribution-list code,
+.distribution-list em,
+.recent-table button,
+.recent-table code {
+  font-size: var(--font-utility);
+}
+
+.overview-range-trigger,
+.overview-range-menu [role="option"] {
+  font-size: var(--font-caption) !important;
+}
+
+.overview-range-trigger {
+  height: 30px !important;
+}
+
+.overview-range-menu [role="option"] {
+  height: 31px;
+}
+
+/* Lists, filters, and detail inspectors */
+.list-pane {
+  grid-template-rows: 62px minmax(0, 1fr);
+}
+
+.pane-title span {
+  font-size: var(--font-label);
+}
+
+.pane-title small,
+.search input,
+.list-toolbar select,
+.logs-date-input,
+.logs-provider-select,
+.logs-filter-clear,
+.logs-filter-menu > summary,
+.logs-filter-menu__clear,
+.logs-date-control > span,
+.logs-provider-control > span,
+.log-date-filter > span,
+.logs-provider-filter > span {
+  font-size: var(--font-caption);
+}
+
+.search,
+.list-toolbar select,
+.logs-date-input,
+.logs-provider-select,
+.logs-filter-clear,
+.logs-filter-menu > summary {
+  height: 34px;
+}
+
+.logs-page {
+  grid-template-rows: 64px minmax(0, 1fr);
+}
+
+.request-list > button,
+.service-list > button,
+.model-list > button {
+  min-height: 78px;
+}
+
+.request-list strong,
+.service-list strong,
+.model-list strong {
+  font-size: var(--font-body);
+}
+
+.request-list code,
+.service-list code,
+.model-list code,
+.request-list__route > span,
+.request-list time,
+.request-list small,
+.service-list small,
+.model-list small {
+  font-size: var(--font-utility);
+}
+
+.service-list > button > span[class*="text-"] {
+  font-size: var(--font-utility);
+}
+
+.detail-header span,
+.detail-header code {
+  font-size: var(--font-caption);
+}
+
+.detail-header h2 {
+  font-size: 16px;
+}
+
+.detail-section > h3 {
+  font-size: var(--font-label);
+}
+
+.property-grid dt,
+.detail-section--summary .property-grid dt {
+  font-size: var(--font-utility);
+}
+
+.property-grid dd,
+.detail-section--summary .property-grid dd {
+  font-size: var(--font-body);
+}
+
+.warning-callout strong,
+.warning-callout p,
+.audit-field > summary,
+.audit-field section > span,
+.audit-field pre,
+.debug-part > header,
+.debug-part > section > span,
+.debug-part pre {
+  font-size: var(--font-caption);
+}
+
+.audit-field > summary {
+  min-height: 36px;
+  padding-inline: 11px;
+}
+
+.audit-field pre,
+.debug-part pre {
+  line-height: 1.6;
+}
+
+/* Services, models, settings, and rules */
+.copy-field code,
+.copy-field--labeled code,
+.model-hero span,
+.model-hero small,
+.validation-ok,
+.validation-error,
+.integration-status,
+.certificate-fingerprint,
+.model-downloads > small,
+.model-downloads code {
+  font-size: var(--font-caption);
+}
+
+.copy-field--labeled small {
+  font-size: var(--font-utility);
+}
+
+.gateway-options > p {
+  font-size: var(--font-utility);
+  line-height: 1.5;
+}
+
+.model-hero strong,
+.model-downloads > button {
+  font-size: var(--font-body);
+}
+
+.settings-group__heading h2 {
+  font-size: 14px;
+}
+
+.settings-group__heading p,
+.settings-group .setting-row small {
+  font-size: var(--font-caption);
+}
+
+.settings-group .setting-row strong,
+.settings-group .setting-row > input,
+.settings-group .setting-row > select {
+  font-size: var(--font-body);
+}
+
+.settings-group .setting-row {
+  min-height: 74px;
+}
+
+.entity-controls h2,
+.rules-toolbar h2 {
+  font-size: var(--font-section);
+}
+
+.entity-controls p,
+.rules-toolbar p,
+.rules-footer p {
+  font-size: var(--font-caption);
+}
+
+.entity-toggle-grid label {
+  min-height: 50px;
+}
+
+.entity-toggle-grid strong {
+  font-size: var(--font-caption);
+}
+
+.entity-toggle-grid code {
+  font-size: 9px;
+}
+
+.rules-table > header {
+  height: 40px;
+  font-size: var(--font-caption);
+}
+
+.rules-table > article {
+  min-height: 58px;
+}
+
+/* Local test workbench */
+.local-only-badge,
+.test-privacy-note small,
+.test-pane > header small,
+.test-pane--source > footer small,
+.test-output__empty,
+.test-output__error,
+.test-entities > span,
+.test-entities small {
+  font-size: var(--font-caption);
+}
+
+.test-privacy-note strong,
+.test-pane > header span,
+.test-entities button,
+.test-entities button strong,
+.test-entities button code {
+  font-size: var(--font-body);
+}
+
+.local-only-badge {
+  height: 29px;
+}
+
+.test-pane--source textarea,
+.test-output pre,
+.annotated-result {
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.result-entity small {
+  font-size: 8.5px;
+}
+
+.result-entity code {
+  font-size: var(--font-utility);
+}
+
+.test-entities button {
+  min-height: 28px;
+  height: auto;
+  padding-block: 4px;
+}
+
+/* Calm, discoverable scroll affordance for long inspectors. */
+* {
+  scrollbar-color: #aebdcb transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #aebdcb;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #8fa2b5;
+  background-clip: padding-box;
+}
+
+/* Keep labels until the layout genuinely needs an icon rail. */
+@media (max-width: 980px) {
+  .window-shell {
+    --sidebar-width: 168px;
+  }
+}
+
+@media (min-width: 821px) and (max-width: 900px) {
+  .brand {
+    display: flex;
+  }
+
+  .sidebar {
+    padding-inline: 9px;
+  }
+
+  .nav-item,
+  .sidebar .nav-item {
+    display: grid;
+    justify-content: initial;
+    grid-template-columns: 27px minmax(0, 1fr);
+    padding: 0 11px;
+  }
+
+  .nav-item span {
+    display: inline;
+  }
+}
+
+@media (max-width: 820px) {
+  .window-shell {
+    --sidebar-width: 58px;
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .sidebar {
+    padding-inline: 8px;
+  }
+
+  .nav-item,
+  .sidebar .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .nav-item span {
+    display: none;
+  }
+
+  .sidebar .nav-item--active::before {
+    top: 11px;
+    bottom: 11px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --muted-foreground: #405267;
+    --faint: #52657a;
+    --border: #bcc9d6;
+  }
+
+  .sidebar {
+    border-right-color: #aebdcc;
+  }
+}
