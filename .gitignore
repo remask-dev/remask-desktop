@@ -1,6 +1,7 @@
 .DS_Store
 
 .idea
+artifacts
 
 # Go build outputs
 /remask-core/remask-core
