@@ -6,10 +6,10 @@
         "title": "Remask",
         "decorations": true,
         "transparent": false,
-        "width": 1040,
-        "height": 650,
-        "minWidth": 640,
-        "minHeight": 560,
+        "width": 1000,
+        "height": 635,
+        "minWidth": 794,
+        "minHeight": 600,
         "resizable": true
       }
     ]

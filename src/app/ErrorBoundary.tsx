@@ -2,11 +2,15 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "../shared/ui/Button";
 import { messages } from "../shared/i18n/messages";
+import { writeClientLog } from "../shared/clientLogging";
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
-  componentDidCatch(error: Error, info: ErrorInfo) { console.error("Remask UI error", error, info.componentStack); }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Remask UI error", error, info.componentStack);
+    writeClientLog("react", error, { componentStack: info.componentStack || undefined });
+  }
   render() {
     if (!this.state.error) return this.props.children;
     let stored: string | null = null;

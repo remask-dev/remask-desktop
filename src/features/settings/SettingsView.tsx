@@ -4,13 +4,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { Bot, Terminal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { connection, coreApi } from "../../shared/api/client";
-import type { AuditSettings, BootstrapData, PolicySettings, Upstream } from "../../shared/api/types";
+import type { AuditSettings, PolicySettings, ProxyCAStatus, Upstream } from "../../shared/api/types";
 import { useApp } from "../../app/AppContext";
+import { queryKeys, useSettingsData } from "../../app/useCore";
 import { useI18n } from "../../shared/i18n/I18n";
 import type { MessageKey } from "../../shared/i18n/messages";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Input } from "../../shared/ui/Input";
+import { PageState } from "../../shared/ui/PageState";
 import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
 
@@ -18,7 +20,15 @@ const inTauri = "__TAURI_INTERNALS__" in window;
 type SystemCertificateStatus = { supported: boolean; installed: boolean; platform: string };
 type AIClient = "claude" | "codex";
 
-export function SettingsView({ data }: { data: BootstrapData }) {
+type SettingsData = { settings: AuditSettings; policy: PolicySettings; upstreams: Upstream[]; proxyCA: ProxyCAStatus };
+
+export function SettingsView() {
+  const query = useSettingsData();
+  if (query.isPending || !query.settings || !query.policy || !query.upstreams || !query.proxyCA) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
+  return <SettingsContent data={{ settings: query.settings, policy: query.policy, upstreams: query.upstreams, proxyCA: query.proxyCA }}/>;
+}
+
+function SettingsContent({ data }: { data: SettingsData }) {
   const { t, locale, setLocale } = useI18n();
   const { notify } = useApp();
   const qc = useQueryClient();
@@ -52,12 +62,12 @@ export function SettingsView({ data }: { data: BootstrapData }) {
 
   const savePolicy = useMutation({
     mutationFn: (next: PolicySettings) => coreApi.savePolicy(next),
-    onSuccess: saved => { setPolicy(saved); qc.invalidateQueries(); },
+    onSuccess: saved => { setPolicy(saved); qc.setQueryData(queryKeys.policy, saved); },
     onError: error => { setPolicy(data.policy); notify(String(error)); },
   });
   const saveAudit = useMutation({
     mutationFn: (next: AuditSettings) => coreApi.saveSettings(next),
-    onSuccess: result => { setAudit(result.audit); qc.invalidateQueries(); },
+    onSuccess: result => { setAudit(result.audit); qc.setQueryData(queryKeys.settings, result.audit); },
     onError: error => { setAudit(data.settings); notify(String(error)); },
   });
   const saveGateway = useMutation({
@@ -76,10 +86,10 @@ export function SettingsView({ data }: { data: BootstrapData }) {
       connection.saveGatewayPort(port);
       return "__TAURI_INTERNALS__" in window;
     },
-    onSuccess: restarted => { window.setTimeout(() => qc.invalidateQueries(), restarted ? 700 : 0); notify(t(restarted ? "settingsSavedRestarted" : "settingsSaved")); },
+    onSuccess: restarted => { window.setTimeout(() => qc.invalidateQueries({ queryKey: queryKeys.root }), restarted ? 700 : 0); notify(t(restarted ? "settingsSavedRestarted" : "settingsSaved")); },
     onError: error => { setGatewayPort(connection.proxyPort()); notify(String(error)); },
   });
-  const clearMutation = useMutation({ mutationFn: coreApi.clearLogs, onSuccess: () => { setClear(false); qc.invalidateQueries(); } });
+  const clearMutation = useMutation({ mutationFn: coreApi.clearLogs, onSuccess: () => { setClear(false); qc.invalidateQueries({ queryKey: ["core", "audit-logs"] }); } });
   const installCertificate = useMutation({
     mutationFn: () => invoke<SystemCertificateStatus>("install_system_certificate"),
     onSuccess: status => { setCertificateStatus(status); setConfirmCertificateInstall(false); notify(t("certificateInstalled")); },
@@ -90,7 +100,7 @@ export function SettingsView({ data }: { data: BootstrapData }) {
       await ensureClientUpstreams(client, data.upstreams);
       await invoke("launch_ai_client", { client, forwardProxyAddress: new URL(connection.forwardProxy()).host });
     },
-    onSuccess: () => { qc.invalidateQueries(); notify(t("clientLaunched")); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: queryKeys.upstreams }); notify(t("clientLaunched")); },
     onError: error => notify(String(error)),
   });
 

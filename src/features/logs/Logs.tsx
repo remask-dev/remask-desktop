@@ -1,23 +1,31 @@
 import { Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { AuditEntity, AuditLog, BootstrapData } from "../../shared/api/types";
+import type { AuditEntity, AuditLog } from "../../shared/api/types";
 import { useI18n } from "../../shared/i18n/I18n";
 import { Badge, StatusDot } from "../../shared/ui/Status";
 import { Input } from "../../shared/ui/Input";
+import { useLogsData } from "../../app/useCore";
+import { PageState } from "../../shared/ui/PageState";
 
-export function Logs({ data }: { data: BootstrapData }) {
+export function Logs() {
   const { t, dateLocale } = useI18n();
+  const logsQuery = useLogsData();
+  if (logsQuery.isPending || !logsQuery.data) return <PageState pending={logsQuery.isPending} error={logsQuery.error} onRetry={() => void logsQuery.refetch()}/>;
+  return <LogsContent logs={logsQuery.data} t={t} dateLocale={dateLocale}/>;
+}
+
+function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLog[]; t: ReturnType<typeof useI18n>["t"]; dateLocale: string }) {
   const [query, setQuery] = useState("");
   const [date, setDate] = useState("");
   const [provider, setProvider] = useState("all");
-  const [selected, setSelected] = useState(data.logs[0]?.id || "");
-  const providers = useMemo(() => uniqueValues(data.logs.map((log) => log.upstream_id)), [data.logs]);
-  const logs = useMemo(() => data.logs.filter((log) => {
+  const [selected, setSelected] = useState(sourceLogs[0]?.id || "");
+  const providers = useMemo(() => uniqueValues(sourceLogs.map((log) => log.upstream_id)), [sourceLogs]);
+  const logs = useMemo(() => sourceLogs.filter((log) => {
     const searchable = (log.upstream_id + (log.model ?? "") + log.path).toLowerCase();
     return (!query || searchable.includes(query.toLowerCase())) &&
       (!date || localDateKey(log.timestamp) === date) &&
       (provider === "all" || log.upstream_id === provider);
-  }), [data.logs, query, date, provider]);
+  }), [sourceLogs, query, date, provider]);
   const item = logs.find((log) => log.id === selected) || logs[0];
   const hasFilters = Boolean(date) || provider !== "all";
 

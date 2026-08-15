@@ -36,6 +36,8 @@ html[data-platform="windows"] .sidebar{background:#eef2f6}
 
 .overview-layout{padding:16px 20px 24px;background:#f4f6f9;animation:overview-enter .32s ease-out both}.trust-strip{min-height:78px;margin-bottom:14px;padding:13px 15px;border-color:#dce3eb;border-radius:11px;background:#fff;box-shadow:var(--shadow)}
 @keyframes overview-enter{from{opacity:0}to{opacity:1}}
+.core-loading-indicator{color:#71808b;animation:core-loading-spin 1s linear infinite}
+@keyframes core-loading-spin{to{transform:rotate(360deg)}}
 .trust-strip__title{color:#2c3c4f;font-size:9px}.trust-strip__title svg{color:#1f4268}.trust-step small{color:#929eac}.trust-step strong{font-size:8px;font-weight:620}.trust-strip>i{background:#d7e0e9}
 .proxy-chip,.copy-field{border:1px solid #d8e2ed;border-radius:8px;color:#385875;background:#f3f7fb;box-shadow:none;transition:border-color .14s,background-color .14s}.proxy-chip:hover,.copy-field:hover{border-color:#c7d6e5;background:#edf3f9}.proxy-chip small,.copy-field--labeled small{color:#8195aa}.proxy-chip code,.copy-field code{color:#385875}.proxy-chip svg,.copy-field svg{color:#7892ab}
 .overview-workspace{gap:14px}.overview-primary,.overview-inspector{gap:14px}

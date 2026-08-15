@@ -25,4 +25,3 @@ export interface RuleConfig { id: string; pattern: string; enabled: boolean }
 export interface EntityTypeConfig { type: string; enabled: boolean }
 export interface PolicySettings { enabled: boolean; redact_ai_answers: boolean; entity_types: EntityTypeConfig[]; rules: RuleConfig[] }
 export interface Operation { id: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; progress?: number; message?: string; error?: string }
-export interface BootstrapData { version: VersionResponse; proxyCA: ProxyCAStatus; profiles: Profile[]; upstreams: Upstream[]; models: ModelPackage[]; runtime: RuntimeStatus; activeModel: ActiveModel | null; settings: AuditSettings; policy: PolicySettings; stats: AuditStats; logs: AuditLog[] }
