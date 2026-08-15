@@ -5,6 +5,8 @@ package model
 import (
 	"strings"
 	"testing"
+
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 func TestNormalizeProvider(t *testing.T) {
@@ -47,5 +49,43 @@ func TestProviderCandidatesAutoIncludesCPUFallback(t *testing.T) {
 	}
 	if strings.Join(candidates, ",") == "cpu" {
 		t.Skip("current platform has no configured GPU provider candidate")
+	}
+}
+
+func TestReconcileTokenTypeIDsUsesGraphAsAuthority(t *testing.T) {
+	tensor := func(name string) ort.InputOutputInfo {
+		return ort.InputOutputInfo{Name: name, OrtValueType: ort.ONNXTypeTensor}
+	}
+	tests := []struct {
+		name       string
+		configured string
+		inputs     []ort.InputOutputInfo
+		want       string
+	}{
+		{
+			name:       "removes inferred input missing from optimized graph",
+			configured: "token_type_ids",
+			inputs:     []ort.InputOutputInfo{tensor("input_ids"), tensor("attention_mask")},
+		},
+		{
+			name:   "adds input declared by graph",
+			inputs: []ort.InputOutputInfo{tensor("input_ids"), tensor("attention_mask"), tensor("token_type_ids")},
+			want:   "token_type_ids",
+		},
+		{
+			name:       "keeps custom manifest input for strict validation",
+			configured: "segment_ids",
+			inputs:     []ort.InputOutputInfo{tensor("input_ids"), tensor("attention_mask")},
+			want:       "segment_ids",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manifest := Manifest{Inputs: InputSpec{TokenTypeIDs: test.configured}}
+			reconcileTokenTypeIDs(&manifest, test.inputs)
+			if got := manifest.Inputs.TokenTypeIDs; got != test.want {
+				t.Fatalf("token_type_ids = %q, want %q", got, test.want)
+			}
+		})
 	}
 }

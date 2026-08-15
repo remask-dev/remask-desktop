@@ -2,13 +2,15 @@ import { Box, CheckCircle2, Plus, RefreshCw, RotateCw, Trash2 } from "lucide-rea
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { coreApi } from "../../shared/api/client";
-import type { BootstrapData, ModelPackage, Operation } from "../../shared/api/types";
+import type { ActiveModel, ModelPackage, Operation, RuntimeStatus } from "../../shared/api/types";
 import { useApp } from "../../app/AppContext";
+import { queryKeys, useModelsData } from "../../app/useCore";
 import { useI18n } from "../../shared/i18n/I18n";
 import { Badge, StatusDot } from "../../shared/ui/Status";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Input } from "../../shared/ui/Input";
+import { PageState } from "../../shared/ui/PageState";
 
 type PendingDownload = {
   modelId: string;
@@ -21,7 +23,15 @@ type PendingDownload = {
   variant?: string;
 };
 
-export function Models({ data }: { data: BootstrapData }) {
+type ModelsData = { models: ModelPackage[]; runtime: RuntimeStatus; activeModel: ActiveModel | null };
+
+export function Models() {
+  const query = useModelsData();
+  if (query.isPending || !query.models || query.activeModel === undefined) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
+  return <ModelsContent data={{ models: query.models.models, runtime: query.models.runtime, activeModel: query.activeModel }}/>;
+}
+
+function ModelsContent({ data }: { data: ModelsData }) {
   const { t } = useI18n();
   const { notify } = useApp();
   const qc = useQueryClient();
@@ -34,17 +44,18 @@ export function Models({ data }: { data: BootstrapData }) {
   const current = data.models.find(item => item.id === selected) || data.models[0];
   const pendingSelected = pending !== null && selected === pending.modelId;
 
-  const scan = useMutation({ mutationFn: coreApi.scanModels, onSuccess: () => qc.invalidateQueries() });
-  const unload = useMutation({ mutationFn: coreApi.unloadModel, onSuccess: () => qc.invalidateQueries() });
+  const invalidateModels = () => Promise.all([qc.invalidateQueries({ queryKey: queryKeys.models }), qc.invalidateQueries({ queryKey: queryKeys.activeModel })]);
+  const scan = useMutation({ mutationFn: coreApi.scanModels, onSuccess: invalidateModels });
+  const unload = useMutation({ mutationFn: coreApi.unloadModel, onSuccess: invalidateModels });
   const remove = useMutation({
     mutationFn: coreApi.deleteModel,
-    onSuccess: () => { setDeleteTarget(null); setSelected(""); qc.invalidateQueries(); },
+    onSuccess: () => { setDeleteTarget(null); setSelected(""); void invalidateModels(); },
     onError: error => notify(String(error)),
   });
 
   const activate = useMutation({
     mutationFn: coreApi.activateModel,
-    onSuccess: async result => { await pollOperation(result.operation_id, () => qc.invalidateQueries()); },
+    onSuccess: async result => { await pollOperation(result.operation_id, () => { void invalidateModels(); }); },
     onError: error => notify(String(error)),
   });
 
@@ -75,7 +86,7 @@ export function Models({ data }: { data: BootstrapData }) {
       if (op.status === "succeeded") {
         setPending(null);
         setSelected(modelId);
-        qc.invalidateQueries();
+        void invalidateModels();
         notify(t("downloadComplete"));
         return;
       }
@@ -235,7 +246,7 @@ function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, onDelete, 
     </section>
     <section className="detail-section">
       <h3>{t("validation")}</h3>
-      {model.valid ? <div className="validation-ok"><CheckCircle2 size={16}/>{t("valid")}</div> : model.errors.map(error => <p className="validation-error" key={error}>{error}</p>)}
+      {model.valid ? <div className="validation-ok"><CheckCircle2 size={16}/>{t("valid")}</div> : (model.errors ?? []).map(error => <p className="validation-error" key={error}>{error}</p>)}
     </section>
   </>;
 }

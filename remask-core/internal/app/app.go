@@ -97,19 +97,26 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 		modelsDir = "models"
 	}
 	models := model.NewManager(modelsDir, options.Runtime, detector, operations)
+	selectionStore := model.NewSelectionStore(options.DataDir)
+	models.SetSelectionStore(selectionStore)
 	models.SetMaxInferenceTokens(audits.Settings().MaxInferenceTokens)
 	if err := models.SetProvider(audits.Settings().InferenceProvider); err != nil {
 		return nil, fmt.Errorf("configure model provider: %w", err)
 	}
-	if options.ActiveModel != "" {
-		if _, err := models.Scan(context.Background()); err != nil {
-			return nil, fmt.Errorf("scan models: %w", err)
-		}
-		if err := models.ActivateSync(context.Background(), options.ActiveModel); err != nil {
+	packages, err := models.Scan(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("scan models: %w", err)
+	}
+	activeModel, err := startupModelID(options.ActiveModel, selectionStore, packages)
+	if err != nil {
+		return nil, fmt.Errorf("load active model selection: %w", err)
+	}
+	if activeModel != "" {
+		if err := models.ActivateSync(context.Background(), activeModel); err != nil {
 			if errors.Is(err, model.ErrNotFound) {
-				logger.Printf("active model is not installed; continuing with rules only model=%q", options.ActiveModel)
+				logger.Printf("active model is not installed; continuing with rules only model=%q", activeModel)
 			} else {
-				return nil, fmt.Errorf("activate model %q: %w", options.ActiveModel, err)
+				return nil, fmt.Errorf("activate model %q: %w", activeModel, err)
 			}
 		}
 	}
@@ -131,6 +138,25 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 		handler: handler, proxyHandler: httpapi.NewProxyRouter(logger, proxy),
 		forwardProxyHandler: forward, proxyAuthority: authority,
 	}, nil
+}
+
+func startupModelID(configured string, selectionStore *model.SelectionStore, packages []model.Package) (string, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	selected, exists, err := selectionStore.Load()
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return selected, nil
+	}
+	for _, item := range packages {
+		if item.Valid {
+			return item.ID, nil
+		}
+	}
+	return "", nil
 }
 
 func (a *App) Handler() http.Handler {

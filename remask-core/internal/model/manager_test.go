@@ -108,6 +108,30 @@ func TestActivateSyncLoadsAndMarksModelActive(t *testing.T) {
 	}
 }
 
+func TestModelSelectionPersistsActivationAndExplicitUnload(t *testing.T) {
+	root := t.TempDir()
+	dataDir := t.TempDir()
+	createTestPackage(t, root, "privacy-q4")
+	manager := NewManager(root, testRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	selection := NewSelectionStore(dataDir)
+	manager.SetSelectionStore(selection)
+	if _, err := manager.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ActivateSync(context.Background(), "privacy-q4"); err != nil {
+		t.Fatal(err)
+	}
+	if selected, configured, err := selection.Load(); err != nil || !configured || selected != "privacy-q4" {
+		t.Fatalf("selection after activation = %q, configured=%v, err=%v", selected, configured, err)
+	}
+	if err := manager.Unload(); err != nil {
+		t.Fatal(err)
+	}
+	if selected, configured, err := selection.Load(); err != nil || !configured || selected != "" {
+		t.Fatalf("selection after unload = %q, configured=%v, err=%v", selected, configured, err)
+	}
+}
+
 type testRuntime struct{}
 
 func (testRuntime) Name() string    { return "test" }

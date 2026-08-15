@@ -1,27 +1,23 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Braces, Check, Cpu, ShieldCheck } from "lucide-react";
-import { connection, coreApi } from "../../shared/api/client";
-import type { AuditStatsRange, BootstrapData, DailyStat } from "../../shared/api/types";
+import { connection } from "../../shared/api/client";
+import type { AuditStatsRange, DailyStat } from "../../shared/api/types";
 import { useI18n } from "../../shared/i18n/I18n";
 import { Select } from "../../shared/ui/Select";
 import { useApp } from "../../app/AppContext";
+import { useOverviewData } from "../../app/useCore";
+import { PageState } from "../../shared/ui/PageState";
 
-export function Overview({ data }: { data: BootstrapData }) {
+export function Overview() {
   const { t, dateLocale } = useI18n();
   const { notify } = useApp();
   const proxy = connection.proxy();
   const [range, setRange] = useState<AuditStatsRange>("today");
-  const statsQuery = useQuery({
-    queryKey: ["audit-stats", range],
-    queryFn: () => coreApi.stats(range),
-    initialData: range === "today" ? data.stats : undefined,
-    placeholderData: (previous) => previous,
-    refetchInterval: 15_000,
-  });
-  const stats = statsQuery.data ?? data.stats;
+  const statsQuery = useOverviewData(range);
+  if (statsQuery.isPending || !statsQuery.stats || !statsQuery.policy || statsQuery.activeModel === undefined) return <PageState pending={statsQuery.isPending} error={statsQuery.error} onRetry={() => void statsQuery.refetch()}/>;
+  const stats = statsQuery.stats;
   const max = Math.max(1, ...stats.daily.flatMap((item) => [item.entities, item.requests]));
-  const ruleCount = t("ruleCount").replace("{count}", data.policy.rules.length.toLocaleString(dateLocale));
+  const ruleCount = t("ruleCount").replace("{count}", statsQuery.policy.rules.length.toLocaleString(dateLocale));
   const tpm = Math.round(stats.tokens_per_minute).toLocaleString(dateLocale);
   const cacheHitRate = stats.token_total > 0 ? Math.round((stats.token_cached / stats.token_total) * 100) : 0;
   const rangeOptions = [
@@ -41,12 +37,12 @@ export function Overview({ data }: { data: BootstrapData }) {
       <div className="trust-strip__title"><ShieldCheck size={16}/><span>{t("path")}</span></div>
       <div className="protection-capabilities">
         <div className="protection-node"><span className="protection-node__icon"><Braces size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("rulesEngine")}</small></span><strong>{ruleCount}</strong></span><CapabilityState/></div>
-        <div className="protection-node"><span className="protection-node__icon"><Cpu size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("localModel")}</small></span><strong>{data.activeModel?.name || t("unconfigured")}</strong></span><CapabilityState active={Boolean(data.activeModel)}/></div>
+        <div className="protection-node"><span className="protection-node__icon"><Cpu size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("localModel")}</small></span><strong>{statsQuery.activeModel?.name || t("unconfigured")}</strong></span><CapabilityState active={Boolean(statsQuery.activeModel)}/></div>
         <button className="protection-node protection-node--gateway" aria-label={`${t("copy")} ${t("gateway")}: ${proxy}`} onClick={() => copy(proxy)}><span className="protection-node__icon"><ShieldCheck size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("gateway")}</small></span><span className="protection-node__address"><code>{proxy}</code></span></span><CapabilityState/></button>
       </div>
     </section>
     <div className="overview-workspace overview-workspace--compact">
-      <div className={`overview-primary ${statsQuery.isPlaceholderData ? "overview-primary--updating" : ""}`} aria-busy={statsQuery.isFetching}>
+      <div className="overview-primary" aria-busy={statsQuery.isPending}>
         <section className="metric-row">
           <Metric label={t("protected")} value={stats.entities.toLocaleString(dateLocale)} accent/>
           <Metric label={t("requests")} value={stats.requests.toLocaleString(dateLocale)} detail={`${Math.round(stats.success_rate * 100)}% ${t("success")}`}/>

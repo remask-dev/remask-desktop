@@ -36,8 +36,8 @@ export function LocalTest() {
   </div>;
 }
 
-function annotateResult(text: string, entities: PIIEntity[]) {
-  const byReplacement = new Map(entities.map(entity => [entity.replacement, entity]));
+function annotateResult(text: string, entities: PIIEntity[] | null | undefined) {
+  const byReplacement = new Map((Array.isArray(entities) ? entities : []).map(entity => [entity.replacement, entity]));
   const replacements = [...byReplacement.keys()].sort((a,b) => b.length-a.length);
   if (!replacements.length) return text;
   const pattern = new RegExp(`(${replacements.map(value => value.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|")})`,"g");

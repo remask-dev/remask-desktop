@@ -5,7 +5,6 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -22,9 +21,38 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 
 struct CoreProcess(Mutex<Option<CommandChild>>);
 
-#[derive(Deserialize)]
-struct ModelBundle {
-    active_model: Option<String>,
+#[tauri::command]
+fn append_client_log(app: AppHandle, entry: String) -> Result<(), String> {
+    // Keep the client log in the same per-user directory as the Core data,
+    // without exposing a filesystem path to the webview.
+    let log_dir = app
+        .path()
+        .home_dir()
+        .map_err(|error| error.to_string())?
+        .join(".remask")
+        .join("logs");
+    std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+    let log_path = log_dir.join("client.log");
+    const MAX_CLIENT_LOG_BYTES: u64 = 2 * 1024 * 1024;
+    if let Ok(metadata) = std::fs::metadata(&log_path) {
+        if metadata.len() >= MAX_CLIENT_LOG_BYTES {
+            let rotated_path = log_dir.join("client.log.1");
+            let _ = std::fs::remove_file(&rotated_path);
+            std::fs::rename(&log_path, rotated_path).map_err(|error| error.to_string())?;
+        }
+    }
+    // Parse and re-serialize so one entry always occupies exactly one JSONL
+    // line even if a caller supplies embedded newlines.
+    let parsed: serde_json::Value =
+        serde_json::from_str(&entry).map_err(|error| error.to_string())?;
+    let payload = serde_json::to_string(&parsed).map_err(|error| error.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .map_err(|error| error.to_string())?;
+    use std::io::Write;
+    writeln!(file, "{payload}").map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -118,18 +146,6 @@ fn spawn_core(
     args.push(remask_dir.to_string_lossy().into_owned());
     args.push("--models-dir".to_string());
     args.push(models_dir.to_string_lossy().into_owned());
-    if let Some(bundled_model_id) = bundled_active_model(&bundled_resources) {
-        // A user model directory can already exist without the bundled model.
-        // Only request activation when that concrete package is installed.
-        if models_dir
-            .join(&bundled_model_id)
-            .join("manifest.json")
-            .is_file()
-        {
-            args.push("--active-model".to_string());
-            args.push(bundled_model_id);
-        }
-    }
     if let Some(runtime_library) = find_runtime_library(&bundled_resources) {
         args.push("--onnxruntime-lib".to_string());
         args.push(runtime_library.to_string_lossy().into_owned());
@@ -189,19 +205,6 @@ fn copy_dir_all(source: &Path, destination: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn bundled_active_model(resources_dir: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(resources_dir.join("model-bundle.json")).ok()?;
-    let bundle: ModelBundle = serde_json::from_str(&content).ok()?;
-    bundle.active_model.filter(|id| is_model_id(id))
-}
-
-fn is_model_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .bytes()
-            .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'-' | b'_' | b'.'))
 }
 
 fn find_runtime_library(resource_dir: &Path) -> Option<PathBuf> {
@@ -394,6 +397,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            append_client_log,
             start_core,
             stop_core,
             restart_core,

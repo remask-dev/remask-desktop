@@ -24,11 +24,17 @@ type Manager struct {
 	runtime    Runtime
 	detector   *pii.DynamicDetector
 	operations *operation.Store
+	selection  *SelectionStore
 
+	transitionMu       sync.Mutex
 	mu                 sync.RWMutex
 	packages           map[string]Package
 	active             *managedSession
 	maxInferenceTokens int
+}
+
+func (m *Manager) SetSelectionStore(store *SelectionStore) {
+	m.selection = store
 }
 
 func NewManager(root string, runtime Runtime, detector *pii.DynamicDetector, operations *operation.Store) *Manager {
@@ -195,7 +201,10 @@ func (m *Manager) ActivateSync(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	m.swapActive(item.ID, session)
+	if err := m.commitActive(item.ID, session); err != nil {
+		_ = session.Close()
+		return err
+	}
 	return nil
 }
 
@@ -210,7 +219,11 @@ func (m *Manager) activate(ctx context.Context, operationID string, item Package
 		_ = m.operations.Fail(operationID, err)
 		return
 	}
-	m.swapActive(item.ID, managed)
+	if err := m.commitActive(item.ID, managed); err != nil {
+		_ = managed.Close()
+		_ = m.operations.Fail(operationID, err)
+		return
+	}
 	_ = m.operations.Complete(operationID, map[string]any{"model": managed.Metadata()})
 }
 
@@ -245,7 +258,12 @@ func (m *Manager) loadSession(ctx context.Context, item Package) (*managedSessio
 	return managed, nil
 }
 
-func (m *Manager) swapActive(id string, managed *managedSession) {
+func (m *Manager) commitActive(id string, managed *managedSession) error {
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
+	if err := m.selection.Save(id); err != nil {
+		return fmt.Errorf("persist active model: %w", err)
+	}
 	previousDetector := m.detector.Swap(managed)
 	m.mu.Lock()
 	previousSession := m.active
@@ -259,9 +277,15 @@ func (m *Manager) swapActive(id string, managed *managedSession) {
 	if previousDetector != nil && previousSession != nil {
 		_ = previousSession.Close()
 	}
+	return nil
 }
 
 func (m *Manager) Unload() error {
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
+	if err := m.selection.Save(""); err != nil {
+		return fmt.Errorf("persist unloaded model: %w", err)
+	}
 	previousDetector := m.detector.Swap(nil)
 	m.mu.Lock()
 	previous := m.active

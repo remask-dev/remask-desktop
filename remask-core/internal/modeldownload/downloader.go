@@ -75,10 +75,6 @@ func Download(ctx context.Context, cfg Config) (string, error) {
 		return "", err
 	}
 	maxTokens, stride := modelSequenceConfig(filepath.Join(directory, "config.json"), tokenizerTypeForFiles(files))
-	tokenTypeIDs := ""
-	if configUsesTokenTypeIDs(filepath.Join(directory, "config.json")) {
-		tokenTypeIDs = "token_type_ids"
-	}
 	specs := make(map[string]model.FileSpec, len(files)+1)
 	for _, file := range files {
 		spec, err := fileSpec(filepath.Join(directory, file.local), file.local)
@@ -120,7 +116,11 @@ func Download(ctx context.Context, cfg Config) (string, error) {
 	}
 	manifest := model.Manifest{
 		SchemaVersion: 1, ID: cfg.ID, Name: cfg.Name, Version: version, Task: "token-classification", Quantization: quantization, LabelScheme: labelScheme, MaxTokens: maxTokens, Stride: stride, Files: specs,
-		Inputs: model.InputSpec{InputIDs: "input_ids", AttentionMask: "attention_mask", TokenTypeIDs: tokenTypeIDs}, Outputs: model.OutputSpec{Logits: "logits"},
+		// token_type_ids is intentionally omitted here. The architecture config
+		// describes the source model, but optimized ONNX exports may remove this
+		// optional input. The runtime inspects the graph and enables it when the
+		// exported model actually declares it.
+		Inputs: model.InputSpec{InputIDs: "input_ids", AttentionMask: "attention_mask"}, Outputs: model.OutputSpec{Logits: "logits"},
 		Tokenizer:   model.TokenizerSpec{Type: tokenizerType, LowerCase: tokenizerType == "bert-wordpiece", StripAccents: tokenizerType == "bert-wordpiece", TokenizeChineseChars: tokenizerType == "bert-wordpiece", UnknownToken: "[UNK]", ClassificationToken: "[CLS]", SeparatorToken: "[SEP]", PaddingToken: "[PAD]"},
 		Decoder:     model.DecoderSpec{Type: decoderType, OperatingPoint: "default"},
 		EntityTypes: entityTypesFromLabels(labels), MinimumConfidence: map[string]float64{"*": 0.55}, SelfTestText: "Contact John Smith at john.smith@example.com",
@@ -215,20 +215,6 @@ func modelSequenceConfig(path, tokenizerType string) (int, int) {
 		stride = 0
 	}
 	return maxTokens, stride
-}
-
-func configUsesTokenTypeIDs(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var config struct {
-		TypeVocabSize int `json:"type_vocab_size"`
-	}
-	if json.Unmarshal(data, &config) != nil {
-		return false
-	}
-	return config.TypeVocabSize > 1
 }
 
 func downloadFile(ctx context.Context, client *http.Client, url, destination, token string) error {

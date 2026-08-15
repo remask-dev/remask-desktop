@@ -47,12 +47,6 @@ func main() {
 	if *onnxRuntimeLibrary == "" {
 		*onnxRuntimeLibrary = discoverRuntimeLibrary()
 	}
-	if *activeModel == "" {
-		const defaultModel = "openai-privacy-filter-q4f16"
-		if _, err := os.Stat(filepath.Join(*modelsDir, defaultModel, "manifest.json")); err == nil {
-			*activeModel = defaultModel
-		}
-	}
 	runtime, err := model.NewRuntimeWithOptions(*onnxRuntimeLibrary, model.RuntimeOptions{Provider: *onnxProvider, DeviceID: *onnxDevice})
 	if err != nil {
 		logger.Printf("initialize model runtime: %v", err)
