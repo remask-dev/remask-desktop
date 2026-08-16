@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { coreApi } from "../shared/api/client";
-import type { AuditSettings, AuditStats, AuditStatsRange, PolicySettings, RuntimeStatus } from "../shared/api/types";
+import type { AuditStats, AuditStatsRange, PolicySettings, RuntimeStatus } from "../shared/api/types";
 
 /**
  * Query keys are the resource boundary for the desktop client. Mutations can
@@ -31,10 +31,6 @@ const emptyRuntime = (): RuntimeStatus => ({ available: false, name: "unavailabl
 const emptyStats = (): AuditStats => ({
   requests: 0, entities: 0, success_rate: 0, average_latency_ms: 0, streaming_requests: 0,
   entity_types: {}, daily: [], token_input: 0, token_output: 0, token_total: 0, token_cached: 0, tokens_per_minute: 0,
-});
-const emptySettings = (): AuditSettings => ({
-  record_request_content: false, debug: false, retention_days: 30, max_inference_tokens: 512,
-  inference_provider: "cpu", entity_cache_enabled: true, entity_cache_ttl_seconds: 900,
 });
 const emptyProxyCA = () => ({ ready: false, certificate_path: undefined, fingerprint_sha256: "" });
 
@@ -148,9 +144,12 @@ export function useRulesData() {
 
 export function useSettingsData() {
   const online = useCoreOnline();
-  const settings = useQuery({ queryKey: queryKeys.settings, queryFn: coreApi.settings, enabled: online, initialData: emptySettings, initialDataUpdatedAt: 0 });
-  const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online, initialData: emptyPolicy, initialDataUpdatedAt: 0 });
-  return combineQueries({ settings, policy });
+  const settings = useQuery({ queryKey: queryKeys.settings, queryFn: coreApi.settings, enabled: online });
+  const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online });
+  const result = combineQueries({ settings, policy });
+  // Editable state must not be initialized from another observer's placeholder
+  // data. Once mounted, SettingsContent intentionally owns its local draft.
+  return { ...result, isPending: result.isPending || !settings.isFetched || !policy.isFetched };
 }
 
 type QueryResult = { isPending: boolean; error: unknown; isError: boolean; refetch: () => Promise<unknown> };

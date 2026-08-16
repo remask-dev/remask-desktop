@@ -15,7 +15,7 @@ import { Switch } from "../shared/ui/Switch";
 
 const icons = { overview: Gauge, logs: FileClock, test: FlaskConical, gateway: Network, models: Activity, rules: ListChecks, settings: Settings };
 type View = keyof typeof icons | "settings";
-const nav: View[] = ["overview", "logs", "test", "rules", "gateway", "models"];
+const nav: View[] = ["overview", "logs", "gateway", "rules", "models", "test"];
 function viewFromPath(pathname: string): View {
   const value = pathname.split("/")[1] as View | undefined;
   return value && (value in icons || value === "settings") ? value : "overview";
