@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "stage:core": "bash scripts/stage-core.sh",
+    "desktop:dev": "npm run stage:core && tauri dev --no-watch",
+    "desktop:build": "npm run stage:core && tauri build",
     "icons": "bash scripts/generate-icons.sh",
     "tauri": "tauri"
   },
@@ -19,6 +21,7 @@
     "@tanstack/react-query": "^5.90.20",
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",

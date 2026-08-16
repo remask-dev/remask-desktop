@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
+import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { Bot, Terminal } from "lucide-react";
+import { AppWindow, Bot, Terminal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { connection, coreApi } from "../../shared/api/client";
 import type { AuditSettings, PolicySettings, ProxyCAStatus, Upstream } from "../../shared/api/types";
@@ -103,6 +104,16 @@ function SettingsContent({ data }: { data: SettingsData }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: queryKeys.upstreams }); notify(t("clientLaunched")); },
     onError: error => notify(String(error)),
   });
+  const launchApp = useMutation({
+    mutationFn: async () => {
+      const appPath = await open({ multiple: false, directory: false, title: t("selectApplication") });
+      if (!appPath) return false;
+      await invoke("launch_app_with_proxy", { appPath, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+      return true;
+    },
+    onSuccess: launched => { if (launched) notify(t("appLaunched")); },
+    onError: error => notify(String(error)),
+  });
 
   function updatePolicy(patch: Partial<PolicySettings>) {
     const next = { ...policy, ...patch };
@@ -123,7 +134,8 @@ function SettingsContent({ data }: { data: SettingsData }) {
     </SettingsSection>
     {inTauri && <SettingsSection tone="integration" title={t("systemIntegration")} subtitle={t("systemIntegrationSub")}>
       <SettingRow label={t("systemCertificate")} description={certificateStatusDescription(certificateStatus, t)}><div className="integration-actions"><span className={`integration-status ${certificateStatus?.installed ? "integration-status--ready" : ""}`}>{certificateStatus?.installed ? t("certificateInstalledStatus") : t("certificateNotInstalledStatus")}</span><Button variant="primary" disabled={!certificateStatus?.supported || certificateStatus.installed || installCertificate.isPending} onClick={() => setConfirmCertificateInstall(true)}>{certificateStatus?.installed ? t("certificateInstalledStatus") : t("installCertificate")}</Button></div></SettingRow>
-      <SettingRow last label={t("quickLaunch")} description={t("quickLaunchSub")}><div className="integration-actions integration-actions--clients"><Button icon={<Bot size={14}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("claude")}>{t("launchClaude")}</Button><Button icon={<Terminal size={14}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("codex")}>{t("launchCodex")}</Button></div></SettingRow>
+      <SettingRow label={t("quickLaunch")} description={t("quickLaunchSub")}><div className="integration-actions integration-actions--clients"><Button icon={<Bot size={14}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("claude")}>{t("launchClaude")}</Button><Button icon={<Terminal size={14}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("codex")}>{t("launchCodex")}</Button></div></SettingRow>
+      <SettingRow last label={t("appProxyLaunch")} description={t("appProxyLaunchSub")}><div className="integration-actions"><Button variant="primary" icon={<AppWindow size={14}/>} disabled={launchApp.isPending} onClick={() => launchApp.mutate()}>{t("selectAndLaunchApp")}</Button></div></SettingRow>
     </SettingsSection>}
     <SettingsSection tone="interface" title={t("interfaceSettings")} subtitle={t("interfaceSettingsSub")}>
       <SettingRow label={t("language")} description={locale === "zh" ? "简体中文" : "English"}><Select value={locale} onValueChange={value => setLocale(value as "zh" | "en")} options={[{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }]}/></SettingRow>
