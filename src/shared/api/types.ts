@@ -13,7 +13,7 @@ export interface TokenUsage { input: number; output: number; total: number; cach
 export interface DebugRequest { method: string; url: string; headers?: Record<string, string[]>; body?: string }
 export interface DebugResponse { status: number; headers?: Record<string, string[]>; body?: string }
 export interface DebugExchange { request: DebugRequest; response: DebugResponse }
-export interface AuditLogSummary { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; model?: string; protection_mode?: "redacted" | "passthrough" | "disabled"; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; error_code?: string }
+export interface AuditLogSummary { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; model?: string; protection_mode?: "redacted" | "passthrough" | "disabled"; gateway_type: "api_gateway" | "proxy_gateway"; target_host?: string; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; error_code?: string }
 export interface AuditLog extends AuditLogSummary { fields?: AuditField[]; debug?: DebugExchange }
 export interface DailyStat { date: string; requests: number; entities: number }
 export type AuditStatsRange = "today" | "yesterday" | "7d" | "30d";
@@ -25,5 +25,5 @@ export interface PIIEntity { type: string; replacement: string; confidence: numb
 export interface RedactResult { text: string; scope_id: string; replacement_count: number; entities: PIIEntity[] }
 export interface RuleConfig { id: string; pattern: string; enabled: boolean }
 export interface EntityTypeConfig { type: string; enabled: boolean }
-export interface PolicySettings { enabled: boolean; redact_ai_answers: boolean; entity_types: EntityTypeConfig[]; rules: RuleConfig[] }
+export interface PolicySettings { enabled: boolean; redact_ai_answers: boolean; redact_system_messages: boolean; entity_types: EntityTypeConfig[]; rules: RuleConfig[] }
 export interface Operation { id: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; progress?: number; message?: string; error?: string }

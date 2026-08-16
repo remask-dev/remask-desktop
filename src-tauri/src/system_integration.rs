@@ -64,6 +64,24 @@ pub fn launch_app(
     platform_launch_app(&selected_path, &proxy_url, &certificate)
 }
 
+pub fn launch_preset(
+    app: &AppHandle,
+    preset: &str,
+    forward_proxy_address: &str,
+) -> Result<(), String> {
+    let proxy_url = validated_proxy_url(forward_proxy_address)?;
+    let certificate = certificate_path(app)?;
+    validate_certificate(&certificate)?;
+    match preset {
+        "claude-code" => platform_launch_client("claude", &proxy_url, &certificate),
+        "codex-cli" => platform_launch_client("codex", &proxy_url, &certificate),
+        "codex" => platform_launch_codex(&proxy_url, &certificate),
+        "terminal" => platform_launch_client(platform_shell_executable(), &proxy_url, &certificate),
+        "browser" => platform_launch_browser(&proxy_url, &certificate),
+        _ => Err("unsupported quick-launch preset".into()),
+    }
+}
+
 fn canonical_app_path(selected_path: &str) -> Result<PathBuf, String> {
     let selected_path = selected_path.trim();
     if selected_path.is_empty() {
@@ -83,21 +101,178 @@ fn spawn_app_with_proxy(
     certificate: &Path,
 ) -> Result<(), String> {
     let mut command = Command::new(executable);
+    apply_proxy_environment(&mut command, proxy_url, certificate);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("launch selected application: {error}"))
+}
+
+fn apply_proxy_environment(command: &mut Command, proxy_url: &str, certificate: &Path) {
+    let socks_proxy_url = socks_proxy_url(proxy_url);
     command
         .env("HTTP_PROXY", proxy_url)
         .env("HTTPS_PROXY", proxy_url)
         .env("http_proxy", proxy_url)
         .env("https_proxy", proxy_url)
-        .env("ALL_PROXY", proxy_url)
-        .env("all_proxy", proxy_url)
+        .env("ALL_PROXY", &socks_proxy_url)
+        .env("all_proxy", &socks_proxy_url)
         .env("NODE_EXTRA_CA_CERTS", certificate)
         .env("SSL_CERT_FILE", certificate)
-        .env("NO_PROXY", "127.0.0.1,localhost")
-        .env("no_proxy", "127.0.0.1,localhost");
+        .env("REQUESTS_CA_BUNDLE", certificate)
+        .env("CURL_CA_BUNDLE", certificate);
+}
+
+fn remask_data_dir(certificate: &Path) -> Result<&Path, String> {
+    certificate
+        .ancestors()
+        .nth(2)
+        .ok_or_else(|| "cannot resolve the Remask data directory from the CA path".to_string())
+}
+
+fn user_home_dir(certificate: &Path) -> Result<&Path, String> {
+    certificate
+        .ancestors()
+        .nth(3)
+        .ok_or_else(|| "cannot resolve the user home directory from the CA path".to_string())
+}
+
+fn first_existing_file(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn spawn_browser_with_proxy(
+    executable: &Path,
+    proxy_url: &str,
+    certificate: &Path,
+) -> Result<(), String> {
+    let profile_dir = remask_data_dir(certificate)?.join("browser-profile");
+    std::fs::create_dir_all(&profile_dir).map_err(|error| error.to_string())?;
+    let mut command = Command::new(executable);
+    apply_proxy_environment(&mut command, proxy_url, certificate);
     command
+        .arg(format!("--proxy-server={proxy_url}"))
+        .arg(format!("--user-data-dir={}", profile_dir.display()))
+        .arg("--no-first-run")
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("launch selected application: {error}"))
+        .map_err(|error| format!("launch browser: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn platform_shell_executable() -> &'static str {
+    "zsh"
+}
+
+#[cfg(target_os = "windows")]
+fn platform_shell_executable() -> &'static str {
+    "cmd.exe"
+}
+
+#[cfg(target_os = "linux")]
+fn platform_shell_executable() -> &'static str {
+    "bash"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn platform_shell_executable() -> &'static str {
+    "sh"
+}
+
+#[cfg(target_os = "macos")]
+fn platform_launch_codex(proxy_url: &str, certificate: &Path) -> Result<(), String> {
+    let home = user_home_dir(certificate)?;
+    let candidates = [
+        PathBuf::from("/Applications/Codex.app"),
+        PathBuf::from("/Applications/ChatGPT.app"),
+        home.join("Applications").join("Codex.app"),
+        home.join("Applications").join("ChatGPT.app"),
+    ];
+    let bundle = candidates
+        .into_iter()
+        .find(|path| path.is_dir())
+        .ok_or_else(|| "Codex application was not found in Applications".to_string())?;
+    platform_launch_app(&bundle, proxy_url, certificate)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_launch_browser(proxy_url: &str, certificate: &Path) -> Result<(), String> {
+    let home = user_home_dir(certificate)?;
+    let candidates = [
+        PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        PathBuf::from("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        PathBuf::from("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+        PathBuf::from("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        PathBuf::from("/Applications/Arc.app/Contents/MacOS/Arc"),
+        home.join("Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ];
+    let executable = first_existing_file(candidates)
+        .ok_or_else(|| "no supported Chromium browser was found".to_string())?;
+    spawn_browser_with_proxy(&executable, proxy_url, certificate)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_launch_codex(proxy_url: &str, certificate: &Path) -> Result<(), String> {
+    let home = user_home_dir(certificate)?;
+    let mut candidates = vec![
+        home.join("AppData/Local/Programs/Codex/Codex.exe"),
+        home.join("AppData/Local/Codex/Codex.exe"),
+        home.join("AppData/Local/Programs/ChatGPT/ChatGPT.exe"),
+    ];
+    if let Some(program_files) = std::env::var_os("ProgramFiles") {
+        candidates.push(PathBuf::from(program_files).join("Codex/Codex.exe"));
+    }
+    let executable = first_existing_file(candidates)
+        .ok_or_else(|| "Codex application was not found".to_string())?;
+    spawn_app_with_proxy(&executable, proxy_url, certificate)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_launch_browser(proxy_url: &str, certificate: &Path) -> Result<(), String> {
+    let home = user_home_dir(certificate)?;
+    let mut candidates = vec![
+        home.join("AppData/Local/Google/Chrome/Application/chrome.exe"),
+        home.join("AppData/Local/Microsoft/Edge/Application/msedge.exe"),
+        home.join("AppData/Local/BraveSoftware/Brave-Browser/Application/brave.exe"),
+    ];
+    if let Some(program_files) = std::env::var_os("ProgramFiles") {
+        let root = PathBuf::from(program_files);
+        candidates.push(root.join("Google/Chrome/Application/chrome.exe"));
+        candidates.push(root.join("Microsoft/Edge/Application/msedge.exe"));
+    }
+    let executable = first_existing_file(candidates)
+        .ok_or_else(|| "no supported Chromium browser was found".to_string())?;
+    spawn_browser_with_proxy(&executable, proxy_url, certificate)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_launch_codex(_proxy_url: &str, _certificate: &Path) -> Result<(), String> {
+    Err("Codex desktop quick launch is not available on Linux".into())
+}
+
+#[cfg(target_os = "linux")]
+fn platform_launch_browser(proxy_url: &str, certificate: &Path) -> Result<(), String> {
+    let candidates = [
+        PathBuf::from("/usr/bin/google-chrome"),
+        PathBuf::from("/usr/bin/google-chrome-stable"),
+        PathBuf::from("/usr/bin/chromium"),
+        PathBuf::from("/usr/bin/chromium-browser"),
+        PathBuf::from("/usr/bin/microsoft-edge"),
+        PathBuf::from("/usr/bin/brave-browser"),
+    ];
+    let executable = first_existing_file(candidates)
+        .ok_or_else(|| "no supported Chromium browser was found".to_string())?;
+    spawn_browser_with_proxy(&executable, proxy_url, certificate)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn platform_launch_codex(_proxy_url: &str, _certificate: &Path) -> Result<(), String> {
+    Err("Codex desktop quick launch is not supported on this platform".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn platform_launch_browser(_proxy_url: &str, _certificate: &Path) -> Result<(), String> {
+    Err("browser quick launch is not supported on this platform".into())
 }
 
 #[cfg(target_os = "macos")]
@@ -179,12 +354,16 @@ fn client_executable(client: &str) -> Result<&'static str, String> {
 fn validated_proxy_url(forward_proxy_address: &str) -> Result<String, String> {
     let listen_address: SocketAddr = forward_proxy_address
         .parse()
-        .map_err(|_| "forward proxy address must be an IP address and port")?;
+        .map_err(|_| "proxy gateway address must be an IP address and port")?;
     if !listen_address.ip().is_loopback() || listen_address.port() == 0 {
-        return Err("forward proxy address must use a loopback IP and non-zero port".into());
+        return Err("proxy gateway address must use a loopback IP and non-zero port".into());
     }
 
     Ok(format!("http://{listen_address}"))
+}
+
+fn socks_proxy_url(http_proxy_url: &str) -> String {
+    format!("socks5h://{}", http_proxy_url.trim_start_matches("http://"))
 }
 
 fn validate_certificate(path: &Path) -> Result<(), String> {
@@ -346,10 +525,11 @@ fn platform_launch_client(
 #[cfg(target_os = "macos")]
 fn macos_launcher_script(executable: &str, proxy_url: &str, certificate: &Path) -> String {
     let executable = posix_shell_quote(executable);
+    let socks_proxy_url = posix_shell_quote(&socks_proxy_url(proxy_url));
     let proxy_url = posix_shell_quote(proxy_url);
     let certificate = posix_shell_quote(&certificate.to_string_lossy());
     format!(
-        "#!/bin/zsh\nexport HTTP_PROXY={proxy_url}\nexport HTTPS_PROXY={proxy_url}\nexport http_proxy={proxy_url}\nexport https_proxy={proxy_url}\nexport NODE_EXTRA_CA_CERTS={certificate}\nexport SSL_CERT_FILE={certificate}\nexport NO_PROXY='127.0.0.1,localhost'\nexport no_proxy='127.0.0.1,localhost'\nif command -v {executable} >/dev/null 2>&1; then\n  exec {executable}\nelse\n  echo 'Remask: client executable was not found in PATH:' {executable}\n  exec /bin/zsh -l\nfi\n"
+        "#!/bin/zsh\nexport HTTP_PROXY={proxy_url}\nexport HTTPS_PROXY={proxy_url}\nexport http_proxy={proxy_url}\nexport https_proxy={proxy_url}\nexport ALL_PROXY={socks_proxy_url}\nexport all_proxy={socks_proxy_url}\nexport NODE_EXTRA_CA_CERTS={certificate}\nexport SSL_CERT_FILE={certificate}\nexport REQUESTS_CA_BUNDLE={certificate}\nexport CURL_CA_BUNDLE={certificate}\nif command -v {executable} >/dev/null 2>&1; then\n  exec {executable}\nelse\n  echo 'Remask: client executable was not found in PATH:' {executable}\n  exec /bin/zsh -l\nfi\n"
     )
 }
 
@@ -400,16 +580,19 @@ fn platform_launch_client(
     proxy_url: &str,
     certificate: &Path,
 ) -> Result<(), String> {
+    let socks_proxy_url = socks_proxy_url(proxy_url);
     let status = Command::new("cmd.exe")
         .args(["/C", "start", "", "cmd.exe", "/K", executable])
         .env("HTTP_PROXY", proxy_url)
         .env("HTTPS_PROXY", proxy_url)
         .env("http_proxy", proxy_url)
         .env("https_proxy", proxy_url)
+        .env("ALL_PROXY", &socks_proxy_url)
+        .env("all_proxy", &socks_proxy_url)
         .env("NODE_EXTRA_CA_CERTS", certificate)
         .env("SSL_CERT_FILE", certificate)
-        .env("NO_PROXY", "127.0.0.1,localhost")
-        .env("no_proxy", "127.0.0.1,localhost")
+        .env("REQUESTS_CA_BUNDLE", certificate)
+        .env("CURL_CA_BUNDLE", certificate)
         .status()
         .map_err(|error| error.to_string())?;
     if !status.success() {
@@ -469,6 +652,7 @@ fn platform_launch_client(
     proxy_url: &str,
     certificate: &Path,
 ) -> Result<(), String> {
+    let socks_proxy_url = socks_proxy_url(proxy_url);
     let candidates: &[(&str, &[&str])] = &[
         ("/usr/bin/x-terminal-emulator", &["-e"]),
         ("/usr/bin/gnome-terminal", &["--"]),
@@ -488,10 +672,12 @@ fn platform_launch_client(
         .env("HTTPS_PROXY", proxy_url)
         .env("http_proxy", proxy_url)
         .env("https_proxy", proxy_url)
+        .env("ALL_PROXY", &socks_proxy_url)
+        .env("all_proxy", &socks_proxy_url)
         .env("NODE_EXTRA_CA_CERTS", certificate)
         .env("SSL_CERT_FILE", certificate)
-        .env("NO_PROXY", "127.0.0.1,localhost")
-        .env("no_proxy", "127.0.0.1,localhost")
+        .env("REQUESTS_CA_BUNDLE", certificate)
+        .env("CURL_CA_BUNDLE", certificate)
         .spawn()
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -559,5 +745,7 @@ mod tests {
         );
         assert!(script.contains("exec 'claude'"));
         assert!(script.contains("'/Users/test user/remask-ca.pem'"));
+        assert!(script.contains("export HTTPS_PROXY='http://127.0.0.1:17682'"));
+        assert!(script.contains("export ALL_PROXY='socks5h://127.0.0.1:17682'"));
     }
 }

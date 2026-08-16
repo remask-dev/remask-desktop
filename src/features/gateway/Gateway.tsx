@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AppWindow, Bot, Copy, KeyRound, Network, Plus, Server, ShieldCheck, Terminal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AppWindow, Bot, ChevronDown, Copy, Globe2, KeyRound, Network, Plus, Server, ShieldCheck, SquareTerminal, Terminal } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { connection, coreApi } from "../../shared/api/client";
 import type { Profile, ProxyCAStatus, ProxyRule, Upstream } from "../../shared/api/types";
 import { useApp } from "../../app/AppContext";
@@ -23,6 +23,7 @@ const blankProxyRule: ProxyRule = { id: "", hosts: [""], port: 443, profile_id: 
 type GatewayData = { upstreams: Upstream[]; profiles: Profile[]; proxyCA: ProxyCAStatus; proxyRules: ProxyRule[] };
 type SystemCertificateStatus = { supported: boolean; installed: boolean; platform: string };
 type AIClient = "claude" | "codex";
+type QuickLaunchPreset = "claude-code" | "codex" | "codex-cli" | "terminal" | "browser";
 
 export function Gateway() {
   const query = useGatewayData();
@@ -32,16 +33,16 @@ export function Gateway() {
 
 function GatewayContent({ data }: { data: GatewayData }) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"api" | "http">("api");
+  const [tab, setTab] = useState<"api" | "proxy">("proxy");
   return <div className="gateway-page">
     <header className="page-header gateway-header">
       <div className="gateway-header__title"><h1>{t("gatewayTitle")}</h1><p>{t(tab === "api" ? "apiGatewayDescription" : "httpProxyDescription")}</p></div>
       <div className="gateway-tabs" role="tablist" aria-label={t("gatewayTitle")}>
         <button id="gateway-tab-api" role="tab" aria-controls="gateway-panel" aria-selected={tab === "api"} className={tab === "api" ? "active" : ""} onClick={() => setTab("api")}><Server size={15}/><strong>{t("apiGateway")}</strong></button>
-        <button id="gateway-tab-http" role="tab" aria-controls="gateway-panel" aria-selected={tab === "http"} className={tab === "http" ? "active" : ""} onClick={() => setTab("http")}><Network size={15}/><strong>{t("httpProxyGateway")}</strong></button>
+        <button id="gateway-tab-proxy" role="tab" aria-controls="gateway-panel" aria-selected={tab === "proxy"} className={tab === "proxy" ? "active" : ""} onClick={() => setTab("proxy")}><Network size={15}/><strong>{t("proxyGateway")}</strong></button>
       </div>
     </header>
-    <div id="gateway-panel" className="gateway-stage" role="tabpanel" aria-labelledby={tab === "api" ? "gateway-tab-api" : "gateway-tab-http"}>{tab === "api" ? <APIGateway data={data}/> : <HTTPProxyGateway data={data}/>}</div>
+    <div id="gateway-panel" className="gateway-stage" role="tabpanel" aria-labelledby={tab === "api" ? "gateway-tab-api" : "gateway-tab-proxy"}>{tab === "api" ? <APIGateway data={data}/> : <ProxyGateway data={data}/>}</div>
   </div>;
 }
 
@@ -55,14 +56,14 @@ function APIGateway({ data }: { data: GatewayData }) {
   const toggle = useMutation({ mutationFn: (item: Upstream) => coreApi.putUpstream({ ...item, enabled: !item.enabled }, true), onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.upstreams }), onError: error => notify(String(error)) });
   async function copy(value: string) { await navigator.clipboard.writeText(value); notify(t("copied")); }
   return <div className="gateway-workspace">
-    <GatewayEndpoint icon={<Server size={15}/>} title={t("apiGateway")} value={connection.proxy()} onCopy={copy}/>
-    <div className="split-view gateway-split"><section className="list-pane"><div className="pane-title"><div><span>{t("providers")}</span><small>{data.upstreams.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={() => setEditing({ ...blankProvider })}>{t("addProvider")}</Button></div><div className="service-list gateway-entity-list">{data.upstreams.map(item => <div key={item.id} className={`gateway-entity-row ${current?.id === item.id ? "selected" : ""} ${item.enabled ? "" : "disabled"}`}><button className="gateway-entity-select" onClick={() => setSelected(item.id)}><span className="service-icon"><Server size={15}/></span><span><strong>{item.id}</strong><code>{item.base_url}</code><small>{item.profile_id}</small></span></button><Switch ariaLabel={`${item.id} ${t("enabled")}`} disabled={toggle.isPending} checked={item.enabled} onCheckedChange={() => toggle.mutate(item)}/></div>)}</div></section><section className="detail-pane">{current ? <><header className="detail-header"><div><span>{t("provider")}</span><h2>{current.id}</h2><code>{current.base_url}</code></div><div className="header-actions"><Button onClick={() => setEditing({ ...current })}>{t("edit")}</Button><Button variant="danger" onClick={() => setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section gateway-options"><h3>{t("apiAccessAddress")}</h3><GatewayAddress label={t("sdkBaseUrl")} value={`${connection.proxy()}/proxy/${current.id}`} onCopy={copy}/><p>{t("apiAccessNote")}</p></section><section className="detail-section detail-section--summary"><h3>{t("connectionConfig")}</h3><dl className="property-grid"><div><dt>{t("profile")}</dt><dd>{current.profile_id}</dd></div><div><dt>{t("credential")}</dt><dd>{current.credential_mode === "managed" ? t("managed") : t("pass")}</dd></div></dl></section></> : <GatewayEmpty icon={<Server size={24}/>} title={t("addProvider")} description={t("providerEmpty")} action={() => setEditing({ ...blankProvider })}/>}</section></div>
+    <GatewayAccessBar icon={<Server size={14}/>} title={t("apiGateway")} value={connection.proxy()} onCopy={copy}/>
+    <div className="split-view gateway-split"><section className="list-pane"><div className="pane-title"><div><span>{t("providers")}</span><small>{data.upstreams.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={() => setEditing({ ...blankProvider })}>{t("addProvider")}</Button></div><div className="service-list gateway-entity-list">{data.upstreams.map(item => <div key={item.id} className={`gateway-entity-row ${current?.id === item.id ? "selected" : ""} ${item.enabled ? "" : "disabled"}`}><button className="gateway-entity-select" onClick={() => setSelected(item.id)}><span className="service-icon"><Server size={15}/></span><span><strong>{item.id}</strong><code>{item.base_url}</code><small>{item.profile_id}</small></span></button><Switch ariaLabel={`${item.id} ${t("enabled")}`} disabled={toggle.isPending} checked={item.enabled} onCheckedChange={() => toggle.mutate(item)}/></div>)}</div></section><section className="detail-pane">{current ? <><header className="detail-header"><div><span>{t("provider")}</span><h2>{current.id}</h2><code>{current.base_url}</code></div><div className="header-actions"><Button onClick={() => setEditing({ ...current })}>{t("edit")}</Button><Button variant="danger" onClick={() => setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section gateway-options"><h3>{t("apiAccessAddress")}</h3><GatewayAddress label={t("sdkBaseUrl")} value={`${connection.proxy()}/proxy/${current.id}`} onCopy={copy}/><p>{t("apiAccessNote")}</p></section><section className="detail-section detail-section--summary"><h3>{t("connectionConfig")}</h3><dl className="property-grid"><div><dt>{t("profile")}</dt><dd title={current.profile_id}>{current.profile_id}</dd></div><div><dt>{t("credential")}</dt><dd title={current.credential_mode === "managed" ? t("managed") : t("pass")}>{current.credential_mode === "managed" ? t("managed") : t("pass")}</dd></div></dl></section></> : <GatewayEmpty icon={<Server size={24}/>} title={t("addProvider")} description={t("providerEmpty")} action={() => setEditing({ ...blankProvider })}/>}</section></div>
     <ProviderDialog item={editing} data={data} onClose={() => setEditing(null)}/>
     <Dialog open={!!confirm} title={t("confirmDeleteProvider")} onClose={() => setConfirm(null)} footer={<><Button onClick={() => setConfirm(null)}>{t("cancel")}</Button><Button variant="danger" onClick={() => confirm && remove.mutate(confirm)}>{t("confirm")}</Button></>}><p className="dialog-message">{confirm}</p></Dialog>
   </div>;
 }
 
-function HTTPProxyGateway({ data }: { data: GatewayData }) {
+function ProxyGateway({ data }: { data: GatewayData }) {
   const { t } = useI18n(); const { notify } = useApp(); const qc = useQueryClient();
   const [selected, setSelected] = useState(data.proxyRules[0]?.id || "");
   const [editing, setEditing] = useState<ProxyRule | null>(null);
@@ -74,33 +75,48 @@ function HTTPProxyGateway({ data }: { data: GatewayData }) {
   const remove = useMutation({ mutationFn: coreApi.deleteProxyRule, onSuccess: () => { setConfirm(null); setSelected(""); void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); }, onError: error => notify(String(error)) });
   const toggle = useMutation({ mutationFn: (item: ProxyRule) => coreApi.putProxyRule({ ...item, enabled: !item.enabled }, true), onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }), onError: error => notify(String(error)) });
   const installCertificate = useMutation({ mutationFn: () => invoke<SystemCertificateStatus>("install_system_certificate"), onSuccess: status => { setCertificateStatus(status); setConfirmCertificateInstall(false); notify(t("certificateInstalled")); }, onError: error => notify(String(error)) });
-  const launchClient = useMutation({ mutationFn: async (client: AIClient) => { await ensureClientProxyRules(client, data.proxyRules); await invoke("launch_ai_client", { client, forwardProxyAddress: new URL(connection.forwardProxy()).host }); }, onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); notify(t("clientLaunched")); }, onError: error => notify(String(error)) });
+  const launchPreset = useMutation({ mutationFn: async (preset: QuickLaunchPreset) => { const client = presetRuleClients[preset]; if (client) await ensureClientProxyRules(client, data.proxyRules); await invoke("launch_preset_with_proxy", { preset, forwardProxyAddress: new URL(connection.forwardProxy()).host }); }, onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); notify(t("quickLaunchStarted")); }, onError: error => notify(String(error)) });
   const launchApp = useMutation({ mutationFn: async () => { const appPath = await open({ multiple: false, directory: false, title: t("selectApplication") }); if (!appPath) return false; await invoke("launch_app_with_proxy", { appPath, forwardProxyAddress: new URL(connection.forwardProxy()).host }); return true; }, onSuccess: launched => { if (launched) notify(t("appLaunched")); }, onError: error => notify(String(error)) });
   async function copy(value: string) { await navigator.clipboard.writeText(value); notify(t("copied")); }
-  const env = `HTTP_PROXY=${connection.forwardProxy()}\nHTTPS_PROXY=${connection.forwardProxy()}`;
+  const env = proxyEnvironment(connection.forwardProxy(), connection.socksProxy(), data.proxyCA.certificate_path);
   return <div className="gateway-workspace">
-    <GatewayEndpoint icon={<Network size={15}/>} title={t("httpProxyGateway")} value={connection.forwardProxy()} onCopy={copy} aside={<div className="gateway-endpoint__status"><span className="status-dot success"/>{t("transparentFallback")}</div>}/>
-    <section className="proxy-integrations">
-      <div className="proxy-certificate-row">
-        <div className="proxy-integration__identity"><span className="proxy-integration__icon"><ShieldCheck size={15}/></span><span><strong>{t("systemCertificate")}</strong><small>{certificateStatusDescription(certificateStatus, t)}</small></span></div>
-        <div className="proxy-certificate-actions"><Badge tone={certificateStatus?.installed ? "success" : "warning"}>{certificateStatus?.installed ? t("certificateInstalledStatus") : t("certificateNotInstalledStatus")}</Badge>{inTauri && <Button disabled={!certificateStatus?.supported || certificateStatus.installed} onClick={() => setConfirmCertificateInstall(true)}>{t("installCertificate")}</Button>}</div>
+    <section className="proxy-access-bar">
+      <div className="proxy-access-primary">
+        <GatewayAccessAddress icon={<Network size={14}/>} title={t("httpProxyAddress")} value={connection.forwardProxy()} onCopy={copy}/>
+        <GatewayAccessAddress title={t("socksProxyAddress")} value={connection.socksProxy()} onCopy={copy}/>
+        <span className="proxy-access-ca" title={certificateStatusDescription(certificateStatus, t)}><span>{t("systemCertificate")}</span><Badge tone={!certificateStatus ? "neutral" : certificateStatus.installed ? "success" : "warning"}>{!certificateStatus ? t("certificateChecking") : certificateStatus.installed ? t("certificateInstalledStatus") : t("certificateNotInstalledStatus")}</Badge></span>
       </div>
-      <div className="proxy-tools-row">
-        <button className="proxy-env-action" onClick={() => void copy(env)}><Copy size={13}/><span><strong>{t("copyProxyEnv")}</strong><code>HTTP_PROXY / HTTPS_PROXY</code></span></button>
-        {inTauri && <div className="proxy-launch-actions"><Button icon={<Bot size={13}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("claude")}>{t("launchClaude")}</Button><Button icon={<Terminal size={13}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("codex")}>{t("launchCodex")}</Button><Button icon={<AppWindow size={13}/>} disabled={launchApp.isPending} onClick={() => launchApp.mutate()}>{t("selectAndLaunchApp")}</Button></div>}
-      </div>
+      {inTauri && <QuickLaunchSplit disabled={launchApp.isPending || launchPreset.isPending} onPrimary={() => launchApp.mutate()} onSelect={preset => launchPreset.mutate(preset)}/>}
     </section>
-    <div className="split-view gateway-split"><section className="list-pane"><div className="pane-title"><div><span>{t("protectedTargets")}</span><small>{data.proxyRules.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={() => setEditing({ ...blankProxyRule, hosts: [...blankProxyRule.hosts] })}>{t("addProtectedTarget")}</Button></div><div className="service-list gateway-entity-list">{data.proxyRules.map(item => <div key={item.id} className={`gateway-entity-row ${current?.id === item.id ? "selected" : ""} ${item.enabled ? "" : "disabled"}`}><button className="gateway-entity-select" onClick={() => setSelected(item.id)}><span className="service-icon"><ShieldCheck size={15}/></span><span><strong>{item.id}</strong><code>{item.hosts.join(", ")}{item.port ? `:${item.port}` : ""}</code><small>{item.profile_id}</small></span></button><Switch ariaLabel={`${item.id} ${t("enableProtection")}`} disabled={toggle.isPending} checked={item.enabled} onCheckedChange={() => toggle.mutate(item)}/></div>)}</div></section><section className="detail-pane">{current ? <><header className="detail-header"><div><span>{t("protectedTarget")}</span><h2>{current.id}</h2><code>{current.hosts.join(", ")}{current.port ? `:${current.port}` : ""}</code></div><div className="header-actions"><Button onClick={() => setEditing({ ...current, hosts: [...current.hosts] })}>{t("edit")}</Button><Button variant="danger" onClick={() => setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section"><h3>{t("matchingScope")}</h3><dl className="property-grid"><div><dt>{t("targetHost")}</dt><dd>{current.hosts.join(", ")}</dd></div><div><dt>{t("targetPort")}</dt><dd>{current.port || t("anyPort")}</dd></div><div><dt>{t("profile")}</dt><dd>{current.profile_id}</dd></div><div><dt>{t("tlsInspection")}</dt><dd className={current.enabled ? "success" : "warning"}>{current.enabled ? t("enabled") : t("disabledStatus")}</dd></div></dl></section><section className="detail-section proxy-behavior"><h3>{t("proxyBehavior")}</h3><p>{t("proxyBehaviorNote")}</p></section></> : <GatewayEmpty icon={<ShieldCheck size={24}/>} title={t("addProtectedTarget")} description={t("protectedTargetEmpty")} action={() => setEditing({ ...blankProxyRule, hosts: [...blankProxyRule.hosts] })}/>}</section></div>
+    <div className="split-view gateway-split"><section className="list-pane"><div className="pane-title"><div><span>{t("protectedTargets")}</span><small>{data.proxyRules.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={() => setEditing({ ...blankProxyRule, hosts: [...blankProxyRule.hosts] })}>{t("addProtectedTarget")}</Button></div><div className="service-list gateway-entity-list">{data.proxyRules.map(item => <div key={item.id} className={`gateway-entity-row ${current?.id === item.id ? "selected" : ""} ${item.enabled ? "" : "disabled"}`}><button className="gateway-entity-select" onClick={() => setSelected(item.id)}><span className="service-icon"><ShieldCheck size={15}/></span><span><strong>{item.id}</strong><code>{item.hosts[0] || "—"}</code><small>{item.profile_id}</small></span></button><Switch ariaLabel={`${item.id} ${t("enableProtection")}`} disabled={toggle.isPending} checked={item.enabled} onCheckedChange={() => toggle.mutate(item)}/></div>)}</div></section><section className="detail-pane">{current ? <><header className="detail-header"><div><span>{t("protectedTarget")}</span><h2>{current.id}</h2></div><div className="header-actions"><Button onClick={() => setEditing({ ...current, hosts: [...current.hosts] })}>{t("edit")}</Button><Button variant="danger" onClick={() => setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section detail-section--summary"><h3>{t("matchingScope")}</h3><div className="gateway-hosts"><span>{t("targetHost")}</span><div>{current.hosts.map((host, index) => <code key={`${host}-${index}`} title={host}>{host}</code>)}</div></div><dl className="property-grid"><div><dt>{t("profile")}</dt><dd title={current.profile_id}>{current.profile_id}</dd></div><div><dt>{t("tlsInspection")}</dt><dd className={current.enabled ? "success" : "warning"} title={current.enabled ? t("enabled") : t("disabledStatus")}>{current.enabled ? t("enabled") : t("disabledStatus")}</dd></div></dl></section><ProxyConnectionDetails env={env} proxyCA={data.proxyCA} certificateStatus={certificateStatus} onCopy={copy} onInstall={() => setConfirmCertificateInstall(true)}/></> : <GatewayEmpty icon={<ShieldCheck size={24}/>} title={t("addProtectedTarget")} description={t("protectedTargetEmpty")} action={() => setEditing({ ...blankProxyRule, hosts: [...blankProxyRule.hosts] })}/>}</section></div>
     <ProxyRuleDialog item={editing} data={data} onClose={() => setEditing(null)}/>
     <Dialog open={!!confirm} title={t("confirmDeleteTarget")} onClose={() => setConfirm(null)} footer={<><Button onClick={() => setConfirm(null)}>{t("cancel")}</Button><Button variant="danger" onClick={() => confirm && remove.mutate(confirm)}>{t("confirm")}</Button></>}><p className="dialog-message">{confirm}</p></Dialog>
     <Dialog open={confirmCertificateInstall} title={t("certificateInstallConfirm")} onClose={() => setConfirmCertificateInstall(false)} footer={<><Button onClick={() => setConfirmCertificateInstall(false)}>{t("cancel")}</Button><Button variant="primary" disabled={installCertificate.isPending} onClick={() => installCertificate.mutate()}>{t("installCertificate")}</Button></>}><p className="dialog-message">{t("certificateInstallDescription")}</p>{data.proxyCA.fingerprint_sha256 && <code className="certificate-fingerprint">SHA-256 {data.proxyCA.fingerprint_sha256}</code>}</Dialog>
   </div>;
 }
 
-function GatewayEndpoint({ icon, title, value, onCopy, aside }: { icon: React.ReactNode; title: string; value: string; onCopy: (value: string) => void; aside?: React.ReactNode }) {
-  return <section className="gateway-endpoint"><span className="gateway-endpoint__icon">{icon}</span><div><span>{title}</span><button onClick={() => onCopy(value)}><code>{value}</code><Copy size={13}/></button></div>{aside && <aside>{aside}</aside>}</section>;
+function GatewayAccessBar({ icon, title, value, onCopy }: { icon: React.ReactNode; title: string; value: string; onCopy: (value: string) => void }) {
+  return <section className="proxy-access-bar"><GatewayAccessAddress icon={icon} title={title} value={value} onCopy={onCopy}/></section>;
 }
-
+function GatewayAccessAddress({ icon, title, value, onCopy }: { icon?: React.ReactNode; title: string; value: string; onCopy: (value: string) => void }) {
+  return <div className="proxy-access-address">{icon && <span className="proxy-access-icon">{icon}</span>}<span><small>{title}</small><button onClick={() => void onCopy(value)}><code>{value}</code><Copy size={12}/></button></span></div>;
+}
+function QuickLaunchSplit({ disabled, onPrimary, onSelect }: { disabled: boolean; onPrimary: () => void; onSelect: (preset: QuickLaunchPreset) => void }) {
+  const { t } = useI18n(); const [open, setOpen] = useState(false); const root = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!open) return; const closeOutside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); }; const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); }; document.addEventListener("pointerdown", closeOutside); document.addEventListener("keydown", closeOnEscape); return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape); }; }, [open]);
+  const options: Array<{ value: QuickLaunchPreset; label: MessageKey; icon: React.ReactNode }> = [
+    { value: "claude-code", label: "claudeCode", icon: <Bot size={14}/> },
+    { value: "codex", label: "codexApp", icon: <AppWindow size={14}/> },
+    { value: "codex-cli", label: "codexCLI", icon: <Terminal size={14}/> },
+    { value: "terminal", label: "terminalApp", icon: <SquareTerminal size={14}/> },
+    { value: "browser", label: "browserApp", icon: <Globe2 size={14}/> },
+  ];
+  return <div className="quick-launch-split" ref={root}><Button className="quick-launch-split__primary" icon={<ShieldCheck size={14} strokeWidth={2.3}/>} disabled={disabled} onClick={onPrimary}>{t("launchThroughSecureGateway")}</Button><button className="quick-launch-split__toggle" aria-label={t("moreSecureGatewayLaunchOptions")} aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen(value => !value)}><ChevronDown size={13}/></button>{open && <div className="quick-launch-menu" role="menu">{options.map(option => <button key={option.value} role="menuitem" onClick={() => { setOpen(false); onSelect(option.value); }}>{option.icon}<span>{t(option.label)}</span></button>)}</div>}</div>;
+}
+function ProxyConnectionDetails({ env, proxyCA, certificateStatus, onCopy, onInstall }: { env: string; proxyCA: ProxyCAStatus; certificateStatus: SystemCertificateStatus | null; onCopy: (value: string) => void; onInstall: () => void }) {
+  const { t } = useI18n();
+  return <section className="detail-section proxy-connection"><h3>{t("systemIntegration")}</h3><div className="proxy-connection__certificate"><header><div><strong>{t("systemCertificate")}</strong><small>{certificateStatusDescription(certificateStatus, t)}</small></div><div><Badge tone={!certificateStatus ? "neutral" : certificateStatus.installed ? "success" : "warning"}>{!certificateStatus ? t("certificateChecking") : certificateStatus.installed ? t("certificateInstalledStatus") : t("certificateNotInstalledStatus")}</Badge>{inTauri && certificateStatus?.supported && !certificateStatus.installed && <Button disabled={!proxyCA.certificate_path} onClick={onInstall}>{t("installCertificate")}</Button>}</div></header>{proxyCA.certificate_path && <button className="proxy-connection__path" onClick={() => void onCopy(proxyCA.certificate_path!)}><code>{proxyCA.certificate_path}</code><Copy size={12}/></button>}</div><div className="proxy-connection__environment"><header><div><strong>{t("copyProxyEnv")}</strong><small>{t("proxyEnvironmentNoBypassSub")}</small></div></header><button className="proxy-connection__env" onClick={() => void onCopy(env)}><code>{env}</code><Copy size={13}/></button></div></section>;
+}
 function GatewayAddress({ label, value, onCopy }: { label: string; value: string; onCopy: (value: string) => void }) { return <button className="copy-field copy-field--labeled" onClick={() => onCopy(value)}><span><small>{label}</small><code>{value}</code></span><Copy size={14}/></button>; }
 function GatewayEmpty({ icon, title, description, action }: { icon: React.ReactNode; title: string; description: string; action: () => void }) { return <div className="detail-empty"><span className="detail-empty__icon">{icon}</span><h2>{title}</h2><p>{description}</p><Button variant="primary" onClick={action}>{title}</Button></div>; }
 
@@ -118,11 +134,29 @@ function ProxyRuleDialog({ item, data, onClose }: { item: ProxyRule | null; data
   useEffect(() => { setForm(item ? { ...item, hosts: [...item.hosts] } : { ...blankProxyRule, hosts: [...blankProxyRule.hosts] }); }, [item]);
   const save = useMutation({ mutationFn: () => coreApi.putProxyRule({ ...form, hosts: form.hosts.map(host => host.trim()).filter(Boolean) }, editing), onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); onClose(); } });
   if (!item) return null;
-  return <Dialog open title={editing ? t("editProtectedTarget") : t("addProtectedTarget")} description={t("protectedTargetDialogSub")} onClose={onClose} footer={<><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={!form.id || !form.hosts.some(Boolean) || !form.profile_id}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("targetId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><Field label={t("targetHosts")}><Input value={form.hosts.join(", ")} placeholder="api.openai.com" onChange={event => setForm({ ...form, hosts: event.target.value.split(",") })}/></Field><Field label={t("targetPort")}><Input type="number" min={1} max={65535} value={form.port || ""} onChange={event => setForm({ ...form, port: Number(event.target.value) || undefined })}/></Field><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><label className="field field--switch"><span>{t("enableProtection")}</span><Switch ariaLabel={t("enableProtection")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
+  return <Dialog open title={editing ? t("editProtectedTarget") : t("addProtectedTarget")} description={t("protectedTargetDialogSub")} onClose={onClose} footer={<><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={!form.id || !form.hosts.some(host => host.trim()) || !form.profile_id}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("targetId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><label className="field field--multiline"><span>{t("targetHosts")}</span><textarea rows={5} value={form.hosts.join("\n")} placeholder={"api.openai.com\n*.example.com\n*"} onChange={event => setForm({ ...form, hosts: event.target.value.split(/\r?\n/) })}/></label><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><label className="field field--switch"><span>{t("enableProtection")}</span><Switch ariaLabel={t("enableProtection")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function certificateStatusDescription(status: SystemCertificateStatus | null, t: (key: MessageKey) => string) { if (!status) return t("certificateChecking"); if (!status.supported) return t("certificateUnsupported"); return status.installed ? t("certificateInstalledSub") : t("certificateNotInstalledSub"); }
+
+function proxyEnvironment(proxyUrl: string, socksProxyUrl: string, certificatePath?: string) {
+  const proxyAssignments: Array<[string, string]> = [
+    ["HTTP_PROXY", proxyUrl], ["HTTPS_PROXY", proxyUrl],
+    ["http_proxy", proxyUrl], ["https_proxy", proxyUrl],
+    ["ALL_PROXY", socksProxyUrl], ["all_proxy", socksProxyUrl],
+  ];
+  const certificateAssignments: Array<[string, string]> = certificatePath ? [
+    ["NODE_EXTRA_CA_CERTS", certificatePath], ["SSL_CERT_FILE", certificatePath],
+    ["REQUESTS_CA_BUNDLE", certificatePath], ["CURL_CA_BUNDLE", certificatePath],
+  ] : [];
+  return [proxyAssignments, certificateAssignments]
+    .filter(assignments => assignments.length)
+    .map(assignments => `export ${assignments.map(([key, value]) => `${key}=${shellQuote(value)}`).join(" ")}`)
+    .join("\n");
+}
+
+function shellQuote(value: string) { return `'${value.replaceAll("'", `'"'"'`)}'`; }
 
 const clientProxyRules: Record<AIClient, ProxyRule[]> = {
   claude: [{ id: "anthropic-api", hosts: ["api.anthropic.com"], port: 443, profile_id: "anthropic", enabled: true }],
@@ -130,6 +164,12 @@ const clientProxyRules: Record<AIClient, ProxyRule[]> = {
     { id: "openai-api", hosts: ["api.openai.com"], port: 443, profile_id: "openai", enabled: true },
     { id: "chatgpt", hosts: ["chatgpt.com"], port: 443, profile_id: "codex-chatgpt", enabled: true },
   ],
+};
+
+const presetRuleClients: Partial<Record<QuickLaunchPreset, AIClient>> = {
+  "claude-code": "claude",
+  codex: "codex",
+  "codex-cli": "codex",
 };
 
 async function ensureClientProxyRules(client: AIClient, configured: ProxyRule[]) {

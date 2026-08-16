@@ -79,13 +79,12 @@ function RulesContent({ data }: { data: { policy: PolicySettings; models: ModelP
   };
 
   return <div className="rules-page">
-    <section className="global-policy-note"><ShieldCheck size={15}/><div><strong>{t("globalPolicy")}</strong><p>{t("globalPolicySub")}</p></div></section>
     <section className="entity-controls"><div className="entity-controls__heading"><span className="rules-icon"><ShieldCheck size={17}/></span><div><h2>{t("entityProtection")}</h2><p>{t("entityProtectionSub")}</p></div></div><div className="entity-toggle-grid">{labels.map(entity => { const messageKey = entityLabels[entity.value]; const raw = entity.value.trim(); const key = raw.toUpperCase(); const label = messageKey ? t(messageKey) : entityFriendlyLabels[locale][key as keyof typeof entityFriendlyLabels.zh] || raw || (locale === "zh" ? "未命名实体" : "Unnamed entity"); const configured = policy.entity_types.find(item => item.type === raw); const enabled = configured?.enabled !== false; return <label key={raw || "unnamed-entity"} className={enabled ? "is-enabled" : ""}><span><strong>{label}</strong><code>{raw || "UNKNOWN"}</code></span><Switch ariaLabel={`${label} · ${raw || "UNKNOWN"}`} checked={enabled} onCheckedChange={checked => patchEntity(raw || "UNKNOWN", checked)}/></label>; })}</div></section>
     <section className="custom-rules">
       <header className="rules-toolbar"><div><span className="rules-icon rules-icon--custom"><ListPlus size={17}/></span><div><h2>{t("customRules")}</h2><p>{policy.rules.filter(rule => rule.enabled).length} / {policy.rules.length} {t("enabled")}</p></div></div><Button icon={<Plus size={13}/>} onClick={() => setPolicy({ ...policy, rules: [...policy.rules, blankRule()] })}>{t("addRule")}</Button></header>
       <div className="rules-container">
         <div className="rules-table"><header><span>{t("enabled")}</span><span>{t("ruleId")}</span><span>{t("expression")}</span><i/></header>{policy.rules.map((rule, index) => <article key={index}><Switch checked={rule.enabled} onCheckedChange={enabled => patchRule(index, { enabled })}/><Input value={rule.id} onChange={event => patchRule(index, { id: event.target.value.toUpperCase() })}/><Input className="font-mono" value={rule.pattern} onChange={event => patchRule(index, { pattern: event.target.value })}/><Button size="icon" variant="ghost" aria-label={t("remove")} onClick={() => setPolicy({ ...policy, rules: policy.rules.filter((_, current) => current !== index) })}><Trash2 size={13}/></Button></article>)}</div>
-        <footer className="rules-footer"><p>{t("deterministicRuleNote")}</p><Button variant="primary" onClick={() => void persist(policy, true)}>{t("saveRules")}</Button></footer>
+        <footer className="rules-footer"><Button variant="primary" onClick={() => void persist(policy, true)}>{t("saveRules")}</Button></footer>
       </div>
     </section>
   </div>;
