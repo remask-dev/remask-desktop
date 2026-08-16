@@ -103,7 +103,7 @@ function normalizeUpstream(value: Record<string, unknown>): Upstream {
 
 function normalizeProxyRule(value: Record<string, unknown>): ProxyRule {
   return {
-    id: text(value.id), hosts: stringList(value.hosts), port: number(value.port) || undefined,
+    id: text(value.id), hosts: stringList(value.hosts),
     profile_id: text(value.profile_id), enabled: boolean(value.enabled),
   };
 }
