@@ -19,10 +19,9 @@ import { Switch } from "../../shared/ui/Switch";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const blankProvider: Upstream = { id: "", base_url: "", profile_id: "openai", credential_mode: "passthrough", enabled: true };
-const blankProxyRule: ProxyRule = { id: "", hosts: [""], profile_id: "openai", enabled: true };
+const blankProxyRule: ProxyRule = { id: "", hosts: [""], profile_id: "generic", enabled: true };
 type GatewayData = { upstreams: Upstream[]; profiles: Profile[]; proxyCA: ProxyCAStatus; proxyRules: ProxyRule[] };
 type SystemCertificateStatus = { supported: boolean; installed: boolean; platform: string };
-type AIClient = "claude" | "codex";
 type QuickLaunchPreset = "claude-code" | "codex" | "codex-cli" | "terminal" | "browser";
 
 export function Gateway() {
@@ -75,7 +74,7 @@ function ProxyGateway({ data }: { data: GatewayData }) {
   const remove = useMutation({ mutationFn: coreApi.deleteProxyRule, onSuccess: () => { setConfirm(null); setSelected(""); void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); }, onError: error => notify(String(error)) });
   const toggle = useMutation({ mutationFn: (item: ProxyRule) => coreApi.putProxyRule({ ...item, enabled: !item.enabled }, true), onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }), onError: error => notify(String(error)) });
   const installCertificate = useMutation({ mutationFn: () => invoke<SystemCertificateStatus>("install_system_certificate"), onSuccess: status => { setCertificateStatus(status); setConfirmCertificateInstall(false); notify(t("certificateInstalled")); }, onError: error => notify(String(error)) });
-  const launchPreset = useMutation({ mutationFn: async (preset: QuickLaunchPreset) => { const client = presetRuleClients[preset]; if (client) await ensureClientProxyRules(client, data.proxyRules); await invoke("launch_preset_with_proxy", { preset, forwardProxyAddress: new URL(connection.forwardProxy()).host }); }, onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); notify(t("quickLaunchStarted")); }, onError: error => notify(String(error)) });
+  const launchPreset = useMutation({ mutationFn: (preset: QuickLaunchPreset) => invoke("launch_preset_with_proxy", { preset, forwardProxyAddress: new URL(connection.forwardProxy()).host }), onSuccess: () => notify(t("quickLaunchStarted")), onError: error => notify(String(error)) });
   const launchApp = useMutation({ mutationFn: async () => { const appPath = await open({ multiple: false, directory: false, title: t("selectApplication") }); if (!appPath) return false; await invoke("launch_app_with_proxy", { appPath, forwardProxyAddress: new URL(connection.forwardProxy()).host }); return true; }, onSuccess: launched => { if (launched) notify(t("appLaunched")); }, onError: error => notify(String(error)) });
   async function copy(value: string) { await navigator.clipboard.writeText(value); notify(t("copied")); }
   const env = proxyEnvironment(connection.forwardProxy(), connection.socksProxy(), data.proxyCA.certificate_path);
@@ -84,7 +83,7 @@ function ProxyGateway({ data }: { data: GatewayData }) {
       <div className="proxy-access-primary">
         <GatewayAccessAddress icon={<Network size={14}/>} title={t("httpProxyAddress")} value={connection.forwardProxy()} onCopy={copy}/>
         <GatewayAccessAddress title={t("socksProxyAddress")} value={connection.socksProxy()} onCopy={copy}/>
-        <span className="proxy-access-ca" title={certificateStatusDescription(certificateStatus, t)}><span>{t("systemCertificate")}</span><CertificateStatusAction certificateStatus={certificateStatus} installDisabled={!data.proxyCA.certificate_path} onInstall={() => setConfirmCertificateInstall(true)}/></span>
+        <span className="proxy-access-ca" title={certificateStatusDescription(certificateStatus, t)}><span>{t("systemCertificate")}</span><CertificateStatusAction certificateStatus={certificateStatus} installDisabled={!data.proxyCA.certificate_path} onInstall={() => setConfirmCertificateInstall(true)} showInstallAction={false}/></span>
       </div>
       {inTauri && <QuickLaunchSplit disabled={launchApp.isPending || launchPreset.isPending} onPrimary={() => launchApp.mutate()} onSelect={preset => launchPreset.mutate(preset)}/>}
     </section>
@@ -117,11 +116,11 @@ function ProxyConnectionDetails({ env, proxyCA, certificateStatus, onCopy, onIns
   const { t } = useI18n();
   return <section className="detail-section proxy-connection"><h3>{t("systemIntegration")}</h3><div className="proxy-connection__certificate"><header><div><strong>{t("systemCertificate")}</strong><small>{certificateStatusDescription(certificateStatus, t)}</small></div><div><CertificateStatusAction certificateStatus={certificateStatus} installDisabled={!proxyCA.certificate_path} onInstall={onInstall}/></div></header>{proxyCA.certificate_path && <button className="proxy-connection__path" onClick={() => void onCopy(proxyCA.certificate_path!)}><code>{proxyCA.certificate_path}</code><Copy size={12}/></button>}</div><div className="proxy-connection__environment"><header><div><strong>{t("copyProxyEnv")}</strong><small>{t("proxyEnvironmentNoBypassSub")}</small></div></header><button className="proxy-connection__env" onClick={() => void onCopy(env)}><code>{env}</code><Copy size={13}/></button></div></section>;
 }
-function CertificateStatusAction({ certificateStatus, installDisabled, onInstall }: { certificateStatus: SystemCertificateStatus | null; installDisabled: boolean; onInstall: () => void }) {
+function CertificateStatusAction({ certificateStatus, installDisabled, onInstall, showInstallAction = true }: { certificateStatus: SystemCertificateStatus | null; installDisabled: boolean; onInstall: () => void; showInstallAction?: boolean }) {
   const { t } = useI18n();
   if (!certificateStatus) return <Badge tone="neutral">{t("certificateChecking")}</Badge>;
   if (certificateStatus.installed) return <Badge tone="success">{t("certificateInstalledStatus")}</Badge>;
-  if (inTauri && certificateStatus.supported) return <Button className="w-auto min-w-[76px] px-2.5" disabled={installDisabled} onClick={onInstall}>{t("installCertificate")}</Button>;
+  if (showInstallAction && inTauri && certificateStatus.supported) return <Button className="w-auto min-w-[76px] px-2.5" disabled={installDisabled} onClick={onInstall}>{t("installCertificate")}</Button>;
   return <Badge tone="warning">{t("certificateNotInstalledStatus")}</Badge>;
 }
 function GatewayAddress({ label, value, onCopy }: { label: string; value: string; onCopy: (value: string) => void }) { return <button className="copy-field copy-field--labeled" onClick={() => onCopy(value)}><span><small>{label}</small><code>{value}</code></span><Copy size={14}/></button>; }
@@ -141,7 +140,7 @@ function ProxyRuleDialog({ item, data, onClose }: { item: ProxyRule | null; data
   useEffect(() => { setForm(item ? { ...item, hosts: [...item.hosts] } : { ...blankProxyRule, hosts: [...blankProxyRule.hosts] }); }, [item]);
   const save = useMutation({ mutationFn: () => coreApi.putProxyRule({ ...form, hosts: form.hosts.map(host => host.trim()).filter(Boolean) }, editing), onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); onClose(); }, onError: error => notify(String(error)) });
   if (!item) return null;
-  return <Dialog open title={editing ? t("editProtectedTarget") : t("addProtectedTarget")} description={t("protectedTargetDialogSub")} onClose={onClose} footer={<><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || !form.id || !form.hosts.some(host => host.trim()) || !form.profile_id}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("targetId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><label className="field field--multiline"><span>{t("targetHosts")}</span><textarea rows={5} value={form.hosts.join("\n")} placeholder={"api.openai.com:443\n*.example.com:8443"} onChange={event => setForm({ ...form, hosts: event.target.value.split(/\r?\n/) })}/></label><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><label className="field field--switch"><span>{t("enableProtection")}</span><Switch ariaLabel={t("enableProtection")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
+  return <Dialog open title={editing ? t("editProtectedTarget") : t("addProtectedTarget")} description={t("protectedTargetDialogSub")} onClose={onClose} footer={<><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || !form.id || !form.hosts.some(host => host.trim()) || !form.profile_id}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("targetId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><label className="field field--multiline"><span>{t("targetHosts")}</span><textarea rows={5} value={form.hosts.join("\n")} placeholder={"*.example.com\napi.openai.com:443\n"} onChange={event => setForm({ ...form, hosts: event.target.value.split(/\r?\n/) })}/></label><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><label className="field field--switch"><span>{t("enableProtection")}</span><Switch ariaLabel={t("enableProtection")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
@@ -164,53 +163,3 @@ function proxyEnvironment(proxyUrl: string, socksProxyUrl: string, certificatePa
 }
 
 function shellQuote(value: string) { return `'${value.replaceAll("'", `'"'"'`)}'`; }
-
-const clientProxyRules: Record<AIClient, ProxyRule[]> = {
-  claude: [{ id: "anthropic-api", hosts: ["api.anthropic.com:443"], profile_id: "anthropic", enabled: true }],
-  codex: [
-    { id: "openai-api", hosts: ["api.openai.com:443"], profile_id: "openai", enabled: true },
-    { id: "chatgpt", hosts: ["chatgpt.com:443"], profile_id: "codex-chatgpt", enabled: true },
-  ],
-};
-
-const presetRuleClients: Partial<Record<QuickLaunchPreset, AIClient>> = {
-  "claude-code": "claude",
-  codex: "codex",
-  "codex-cli": "codex",
-};
-
-async function ensureClientProxyRules(client: AIClient, configured: ProxyRule[]) {
-  const pending = [...configured];
-  for (const required of clientProxyRules[client]) {
-    const existing = pending.find(item => item.hosts.some(configuredTarget => required.hosts.some(requiredTarget => targetCovers(configuredTarget, requiredTarget))));
-    if (existing) {
-      if (!existing.enabled) {
-        await coreApi.putProxyRule({ ...existing, enabled: true }, true);
-        existing.enabled = true;
-      }
-      continue;
-    }
-    const id = availableId(required.id, pending.map(item => item.id));
-    const item = { ...required, id, hosts: [...required.hosts] };
-    await coreApi.putProxyRule(item, false);
-    pending.push(item);
-  }
-}
-
-function targetCovers(configured: string, required: string) {
-  const configuredTarget = splitTarget(configured);
-  const requiredTarget = splitTarget(required);
-  return configuredTarget.host === requiredTarget.host && (configuredTarget.port === undefined || configuredTarget.port === requiredTarget.port);
-}
-
-function splitTarget(target: string) {
-  if (target.startsWith("[")) {
-    const closing = target.indexOf("]");
-    return { host: target.slice(1, closing).toLowerCase(), port: target[closing + 1] === ":" ? Number(target.slice(closing + 2)) : undefined };
-  }
-  const separator = target.lastIndexOf(":");
-  if (separator > 0 && target.indexOf(":") === separator) return { host: target.slice(0, separator).toLowerCase(), port: Number(target.slice(separator + 1)) };
-  return { host: target.toLowerCase(), port: undefined };
-}
-
-function availableId(preferred: string, usedValues: string[]) { const used = new Set(usedValues); if (!used.has(preferred)) return preferred; let suffix = 2; while (used.has(`${preferred}-${suffix}`)) suffix += 1; return `${preferred}-${suffix}`; }

@@ -54,6 +54,27 @@ func TestBuiltinProfilesExposeAPIKeyHeaderTemplates(t *testing.T) {
 	}
 }
 
+func TestGenericProfileCombinesBuiltinProviderOperations(t *testing.T) {
+	registry := NewRegistry(Builtins()...)
+	requests := []struct {
+		method string
+		path   string
+		wantID string
+	}{
+		{method: "POST", path: "/v1/chat/completions", wantID: "create-chat-completion"},
+		{method: "POST", path: "/v1/responses", wantID: "create-response"},
+		{method: "POST", path: "/v1/messages", wantID: "create-message"},
+		{method: "POST", path: "/v1beta/models/gemini-pro:generateContent", wantID: "generate-content"},
+		{method: "POST", path: "/backend-api/codex/responses", wantID: "create-codex-response"},
+	}
+	for _, request := range requests {
+		operation, err := registry.Match("generic", request.method, request.path)
+		if err != nil || operation.ID != request.wantID {
+			t.Errorf("generic profile match %s: operation=%#v err=%v", request.path, operation, err)
+		}
+	}
+}
+
 func TestGenericMatchRecognizesModelRequestShapes(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"custom-model","messages":[{"role":"user","content":"hello"}]}`,

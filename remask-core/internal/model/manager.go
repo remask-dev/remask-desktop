@@ -380,17 +380,6 @@ func validatePackage(packagePath string) Package {
 		item.Errors = append(item.Errors, "manifest.json: "+err.Error())
 		return item
 	}
-	// Older downloader versions omitted sequence settings. Keep those already
-	// downloaded packages usable while newer downloads write them explicitly.
-	if item.Manifest.MaxTokens == 0 {
-		item.Manifest.MaxTokens = 512
-	}
-	if item.Manifest.Stride == 0 {
-		item.Manifest.Stride = 128
-		if item.Manifest.Tokenizer.Type != "o200k-base" {
-			item.Manifest.Stride = 64
-		}
-	}
 	item.ID = item.Manifest.ID
 	item.Errors = append(item.Errors, validateManifest(item.Manifest)...)
 	for name, spec := range item.Manifest.Files {

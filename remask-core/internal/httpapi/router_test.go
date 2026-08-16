@@ -71,7 +71,7 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 	})}
 
 	handler := testHandlerWithClient(t, client)
-	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough"}`))
+	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough","enabled":true}`))
 	configure.Header.Set("Content-Type", "application/json")
 	configureResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configureResponse, configure)
@@ -381,7 +381,7 @@ func TestJSONProxyRedactsAIAnswersWhenEnabled(t *testing.T) {
 		upstreamBody, _ = io.ReadAll(r.Body)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}]}`)), Request: r}, nil
 	})})
-	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough"}`))
+	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough","enabled":true}`))
 	configure.Header.Set("Content-Type", "application/json")
 	configureResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configureResponse, configure)
@@ -433,7 +433,7 @@ func TestManagedAPIKeyUsesProfileHeaderTemplate(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}]}`)), Request: r}, nil
 	})}
 	handler := testHandlerWithClient(t, client)
-	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"managed","base_url":"https://mock.example","profile_id":"openai","credential_mode":"managed","api_key":"sk-secret"}`))
+	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"managed","base_url":"https://mock.example","profile_id":"openai","credential_mode":"managed","api_key":"sk-secret","enabled":true}`))
 	configure.Header.Set("Content-Type", "application/json")
 	configureResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configureResponse, configure)
@@ -473,7 +473,7 @@ func TestJSONProxyUsesStableTokensAcrossIndependentRequests(t *testing.T) {
 	})}
 
 	handler := testHandlerWithClient(t, client)
-	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough"}`))
+	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough","enabled":true}`))
 	configure.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(httptest.NewRecorder(), configure)
 
@@ -509,7 +509,7 @@ func TestSSEProxyRestoresTokenAcrossEvents(t *testing.T) {
 	})}
 
 	handler := testHandlerWithClient(t, client)
-	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough"}`))
+	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough","enabled":true}`))
 	configure.Header.Set("Content-Type", "application/json")
 	configureResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configureResponse, configure)
@@ -800,7 +800,7 @@ func TestProxyAutoRouteUsesFirstMatchingService(t *testing.T) {
 	})}
 	handler := testHandlerWithClient(t, client)
 	configureUpstream(t, handler)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"aaa-first","base_url":"https://first.example","profile_id":"openai","credential_mode":"passthrough"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"aaa-first","base_url":"https://first.example","profile_id":"openai","credential_mode":"passthrough","enabled":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -816,7 +816,7 @@ func TestProxyAutoRouteUsesFirstMatchingService(t *testing.T) {
 
 func configureUpstream(t *testing.T, handler http.Handler) {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"mock","base_url":"https://mock.example","profile_id":"openai","credential_mode":"passthrough","enabled":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

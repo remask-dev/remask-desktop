@@ -17,7 +17,7 @@ go run ./cmd/remask-core \
 
 ## 代理网关
 
-代理网关可以直接用于支持 `HTTP_PROXY`/`HTTPS_PROXY` 或 SOCKS5 的现有程序，两种协议共用同一端口。建议 SOCKS 客户端使用 `socks5h://`，让域名在代理端解析并正确命中保护目标。Remask 只解密已配置保护目标的 HTTPS 域名；未配置域名保持原始 TLS 字节隧道。已配置域名中未命中 Profile 的 Path、WebSocket、文件上传和其他未支持格式仍会透明转发，不会因无法识别而阻断。
+代理网关可以直接用于支持 `HTTP_PROXY`/`HTTPS_PROXY` 或 SOCKS5 的现有程序，两种协议共用同一端口。建议 SOCKS 客户端使用 `socks5h://`，让域名在代理端解析并正确命中保护目标。新数据目录预置一条目标地址为 `*`、绑定 `generic` 适配方案的通用保护规则；可按需缩小或删除。Remask 只解密已配置保护目标的 HTTPS 域名；未配置域名保持原始 TLS 字节隧道。已配置域名中未命中 Profile 的 Path、WebSocket、文件上传和其他未支持格式仍会透明转发，不会因无法识别而阻断。
 
 首次启动会在数据目录生成本地 CA：
 
@@ -46,7 +46,7 @@ SSL_CERT_FILE="$HOME/.remask/certificates/remask-ca.pem" \
 codex
 ```
 
-新数据目录会预置 `api.anthropic.com`、`api.openai.com` 和 ChatGPT 登录态 Codex 使用的 `chatgpt.com`。仅包含旧版 OpenAI 默认项的数据目录会自动补齐这三个预置项；自定义过的配置不会被改写，可在服务商页面手动添加对应 Upstream。当前对 Claude Messages、OpenAI Responses 和 Codex HTTP/SSE 请求执行字段级脱敏；WebSocket 连接保持透明，但不进行消息级脱敏。
+新数据目录不预置 Upstream，API 网关提供商由用户按需添加。`generic` 请求适配方案合并 Claude Messages、OpenAI Chat Completions/Responses、Gemini GenerateContent 和 Codex HTTP/SSE 请求的字段级脱敏规则；原有的提供商专用方案继续保留，以兼容已有配置和托管凭证 Header。WebSocket 连接保持透明，但不进行消息级脱敏。
 
 Upstream 配置、规则、审计设置和安全日志默认统一存放在用户 Home 的 `~/.remask` 隐藏目录，可通过 `--data-dir` 或 `REMASK_DATA_DIR` 指定。持久化数据统一使用 SQLite 数据库 `remask.db`，当前用于请求日志，后续可扩展其他本地数据；普通模式下审计日志不会记录 Header、URL 查询参数或实体原文，只保存首尾保留的安全打码预览（如 `138***000`）、实际发送给上游的标签文本、实体标识与模型置信度。正则规则为确定性匹配，命中置信度固定为 `1.0`。普通规则使用 `<MASK_大写规则ID:四位码>`，模型继续使用 `<实体类型:四位码>`；实体类型开关只控制模型输出，普通规则由各自开关控制。
 

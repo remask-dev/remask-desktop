@@ -28,6 +28,34 @@ func TestScanValidatesModelPackage(t *testing.T) {
 	}
 }
 
+func TestScanRejectsManifestWithoutSequenceSettings(t *testing.T) {
+	root := t.TempDir()
+	createTestPackage(t, root, "incomplete-model")
+	manifestPath := filepath.Join(root, "incomplete-model", "manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	delete(manifest, "max_tokens")
+	delete(manifest, "stride")
+	data, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	item := validatePackage(filepath.Dir(manifestPath))
+	if item.Valid || item.Manifest.MaxTokens != 0 || item.Manifest.Stride != 0 {
+		t.Fatalf("incomplete manifest was accepted or filled: %#v", item)
+	}
+}
+
 func TestScanIncludesReadOnlyAndManagedModels(t *testing.T) {
 	managedRoot := t.TempDir()
 	builtinRoot := t.TempDir()

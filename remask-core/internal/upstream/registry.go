@@ -23,22 +23,6 @@ type Upstream struct {
 	Enabled        bool   `json:"enabled"`
 }
 
-// UnmarshalJSON keeps configurations written before the enabled switch
-// backward-compatible: an omitted value means the provider remains enabled.
-func (u *Upstream) UnmarshalJSON(data []byte) error {
-	type upstreamJSON Upstream
-	var decoded struct {
-		upstreamJSON
-		Enabled *bool `json:"enabled"`
-	}
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*u = Upstream(decoded.upstreamJSON)
-	u.Enabled = decoded.Enabled == nil || *decoded.Enabled
-	return nil
-}
-
 func (u Upstream) Validate() error {
 	if strings.TrimSpace(u.ID) == "" || strings.ContainsAny(u.ID, "/\\") {
 		return errors.New("invalid upstream id")
@@ -68,14 +52,6 @@ type Registry struct {
 	filePath string
 }
 
-func DefaultUpstreams() []Upstream {
-	return []Upstream{
-		{ID: "anthropic", BaseURL: "https://api.anthropic.com", ProfileID: "anthropic", CredentialMode: "passthrough", Enabled: true},
-		{ID: "codex-chatgpt", BaseURL: "https://chatgpt.com", ProfileID: "codex-chatgpt", CredentialMode: "passthrough", Enabled: true},
-		{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough", Enabled: true},
-	}
-}
-
 func NewRegistry(dataDir string) (*Registry, error) {
 	registry := &Registry{items: make(map[string]Upstream)}
 	if strings.TrimSpace(dataDir) == "" {
@@ -87,9 +63,6 @@ func NewRegistry(dataDir string) (*Registry, error) {
 	registry.filePath = filepath.Join(dataDir, "upstreams.json")
 	data, err := os.ReadFile(registry.filePath)
 	if errors.Is(err, os.ErrNotExist) {
-		for _, item := range DefaultUpstreams() {
-			registry.items[item.ID] = item
-		}
 		if err := registry.persistLocked(); err != nil {
 			return nil, err
 		}
@@ -110,15 +83,6 @@ func NewRegistry(dataDir string) (*Registry, error) {
 			return nil, errors.New("duplicate upstream id")
 		}
 		registry.items[item.ID] = item
-	}
-	legacyOpenAI := Upstream{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough", Enabled: true}
-	if len(registry.items) == 1 && registry.items[legacyOpenAI.ID] == legacyOpenAI {
-		for _, item := range DefaultUpstreams() {
-			registry.items[item.ID] = item
-		}
-		if err := registry.persistLocked(); err != nil {
-			return nil, err
-		}
 	}
 	return registry, nil
 }

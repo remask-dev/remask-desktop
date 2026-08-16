@@ -447,6 +447,7 @@ Profile 匹配规则：
 
 首版内置 Profile：
 
+- `generic`（合并 OpenAI、Anthropic、Gemini 与 Codex）
 - `openai-chat-completions`
 - `openai-responses`
 - `anthropic-messages`

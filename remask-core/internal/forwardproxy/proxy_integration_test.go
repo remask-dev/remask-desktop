@@ -218,7 +218,7 @@ func TestWildcardHTTPSRuleIsInspected(t *testing.T) {
 		_, _ = fmt.Sscanf(parsed.Port(), "%d", &port)
 	}
 	body, _ := json.Marshal(map[string]any{
-		"id": "wildcard", "hosts": []string{"*"}, "port": port, "profile_id": "openai", "enabled": true,
+		"id": "wildcard", "hosts": []string{fmt.Sprintf("*:%d", port)}, "profile_id": "openai", "enabled": true,
 	})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/proxy-rules", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
@@ -395,7 +395,7 @@ func configureProxyRule(t *testing.T, handler http.Handler, targetURL string) {
 		_, _ = fmt.Sscanf(parsed.Port(), "%d", &port)
 	}
 	body, _ := json.Marshal(map[string]any{
-		"id": "test", "hosts": []string{parsed.Hostname()}, "port": port, "profile_id": "openai", "enabled": true,
+		"id": "test", "hosts": []string{net.JoinHostPort(parsed.Hostname(), strconv.Itoa(port))}, "profile_id": "openai", "enabled": true,
 	})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/proxy-rules", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")

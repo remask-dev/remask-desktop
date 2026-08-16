@@ -19,14 +19,10 @@ var ErrNotFound = errors.New("proxy rule not found")
 // destination itself always comes from the proxy request; a rule only selects
 // the protocol profile used by the protection pipeline.
 type Rule struct {
-	ID    string   `json:"id"`
-	Hosts []string `json:"hosts"`
-	// Port is retained only to migrate rules written by older versions. New
-	// rules encode an optional port in each Hosts entry (for example,
-	// "api.example.com:8443"); an entry without a port matches every port.
-	Port      int    `json:"port,omitempty"`
-	ProfileID string `json:"profile_id"`
-	Enabled   bool   `json:"enabled"`
+	ID        string   `json:"id"`
+	Hosts     []string `json:"hosts"`
+	ProfileID string   `json:"profile_id"`
+	Enabled   bool     `json:"enabled"`
 }
 
 func (r Rule) Validate() error {
@@ -36,12 +32,9 @@ func (r Rule) Validate() error {
 	if len(r.Hosts) == 0 {
 		return errors.New("at least one target is required")
 	}
-	if r.Port < 0 || r.Port > 65535 {
-		return errors.New("target port must be between 1 and 65535")
-	}
 	seen := make(map[string]bool, len(r.Hosts))
 	for _, value := range r.Hosts {
-		target := normalizeTarget(value, r.Port)
+		target := normalizeTarget(value)
 		host, _, _, err := parseTarget(target)
 		if err != nil {
 			return err
@@ -71,20 +64,11 @@ type Registry struct {
 
 func DefaultRules() []Rule {
 	return []Rule{
-		{ID: "anthropic-api", Hosts: []string{"api.anthropic.com:443"}, ProfileID: "anthropic", Enabled: true},
-		{ID: "chatgpt", Hosts: []string{"chatgpt.com:443"}, ProfileID: "codex-chatgpt", Enabled: true},
-		{ID: "openai-api", Hosts: []string{"api.openai.com:443"}, ProfileID: "openai", Enabled: true},
+		{ID: "generic", Hosts: []string{"*"}, ProfileID: "generic", Enabled: true},
 	}
 }
 
 func NewRegistry(dataDir string) (*Registry, error) {
-	return NewRegistryWithDefaults(dataDir, DefaultRules())
-}
-
-// NewRegistryWithDefaults seeds a new registry only when no persisted proxy
-// rule file exists. Callers can use this for one-time migration without
-// coupling future proxy-rule edits back to Provider configuration.
-func NewRegistryWithDefaults(dataDir string, defaults []Rule) (*Registry, error) {
 	registry := &Registry{items: make(map[string]Rule)}
 	if strings.TrimSpace(dataDir) == "" {
 		return registry, nil
@@ -95,7 +79,7 @@ func NewRegistryWithDefaults(dataDir string, defaults []Rule) (*Registry, error)
 	registry.filePath = filepath.Join(dataDir, "proxy_rules.json")
 	data, err := os.ReadFile(registry.filePath)
 	if errors.Is(err, os.ErrNotExist) {
-		for _, item := range defaults {
+		for _, item := range DefaultRules() {
 			item = normalizeRule(item)
 			if err := item.Validate(); err != nil {
 				return nil, err
@@ -117,9 +101,7 @@ func NewRegistryWithDefaults(dataDir string, defaults []Rule) (*Registry, error)
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
 	}
-	migrated := false
 	for _, item := range items {
-		migrated = migrated || item.Port != 0
 		item = normalizeRule(item)
 		if err := item.Validate(); err != nil {
 			return nil, err
@@ -131,11 +113,6 @@ func NewRegistryWithDefaults(dataDir string, defaults []Rule) (*Registry, error)
 	}
 	if err := registry.validateAuthoritiesLocked(); err != nil {
 		return nil, err
-	}
-	if migrated {
-		if err := registry.persistLocked(); err != nil {
-			return nil, err
-		}
 	}
 	return registry, nil
 }
@@ -287,9 +264,8 @@ func normalizeRule(item Rule) Rule {
 	item.ID = strings.TrimSpace(item.ID)
 	item.ProfileID = strings.TrimSpace(item.ProfileID)
 	for index := range item.Hosts {
-		item.Hosts[index] = normalizeTarget(item.Hosts[index], item.Port)
+		item.Hosts[index] = normalizeTarget(item.Hosts[index])
 	}
-	item.Port = 0
 	sort.Strings(item.Hosts)
 	return item
 }
@@ -362,15 +338,12 @@ func parseTargetPort(value string) (int, error) {
 	return port, nil
 }
 
-func normalizeTarget(target string, legacyPort int) string {
+func normalizeTarget(target string) string {
 	host, port, hasPort, err := parseTarget(target)
 	if err != nil {
 		return strings.TrimSpace(target)
 	}
-	if !hasPort && legacyPort != 0 {
-		port = legacyPort
-	}
-	if port == 0 {
+	if !hasPort {
 		return host
 	}
 	if strings.Contains(host, ":") {

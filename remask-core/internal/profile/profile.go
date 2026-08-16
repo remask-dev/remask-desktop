@@ -152,7 +152,7 @@ func pathMatches(patterns []string, requestPath string) bool {
 }
 
 func Builtins() []Profile {
-	return []Profile{
+	providers := []Profile{
 		{
 			ID: "openai", Name: "OpenAI", HeaderTemplates: map[string]string{"Authorization": "Bearer {{api_key}}"},
 			Operations: []Operation{
@@ -210,4 +210,9 @@ func Builtins() []Profile {
 			},
 		},
 	}
+	generic := Profile{ID: "generic", Name: "Generic AI APIs"}
+	for _, provider := range providers {
+		generic.Operations = append(generic.Operations, provider.Operations...)
+	}
+	return append([]Profile{generic}, providers...)
 }

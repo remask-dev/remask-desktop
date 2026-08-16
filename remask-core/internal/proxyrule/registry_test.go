@@ -1,9 +1,7 @@
 package proxyrule
 
 import (
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -13,10 +11,11 @@ func TestRegistryPersistsRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.List()) != len(DefaultRules()) {
-		t.Fatalf("expected default proxy rules")
+	defaults := registry.List()
+	if len(defaults) != 1 || defaults[0].ID != "generic" || len(defaults[0].Hosts) != 1 || defaults[0].Hosts[0] != "*" || defaults[0].ProfileID != "generic" || !defaults[0].Enabled {
+		t.Fatalf("unexpected default proxy rules: %#v", defaults)
 	}
-	item := Rule{ID: "internal", Hosts: []string{"AI.EXAMPLE.COM"}, Port: 8443, ProfileID: "openai", Enabled: true}
+	item := Rule{ID: "internal", Hosts: []string{"AI.EXAMPLE.COM:8443"}, ProfileID: "openai", Enabled: true}
 	if err := registry.Put(item); err != nil {
 		t.Fatal(err)
 	}
@@ -25,37 +24,11 @@ func TestRegistryPersistsRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	matched, ok := reloaded.MatchAuthority("ai.example.com:8443")
-	if !ok || matched.ID != item.ID || matched.Hosts[0] != "ai.example.com:8443" || matched.Port != 0 {
+	if !ok || matched.ID != item.ID || matched.Hosts[0] != "ai.example.com:8443" {
 		t.Fatalf("unexpected match: %#v %t", matched, ok)
 	}
 	if filepath.Base(reloaded.filePath) != "proxy_rules.json" {
 		t.Fatalf("unexpected persistence path: %s", reloaded.filePath)
-	}
-}
-
-func TestRegistryMigratesLegacySharedPort(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "proxy_rules.json")
-	legacy := `[{"id":"legacy","hosts":["API.EXAMPLE.COM","other.example.com"],"port":8443,"profile_id":"openai","enabled":true}]`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	registry, err := NewRegistry(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, authority := range []string{"api.example.com:8443", "other.example.com:8443"} {
-		if _, ok := registry.MatchAuthority(authority); !ok {
-			t.Errorf("legacy target %q did not match", authority)
-		}
-	}
-	persisted, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(persisted), `"port"`) || !strings.Contains(string(persisted), `"api.example.com:8443"`) {
-		t.Fatalf("legacy rule was not migrated: %s", persisted)
 	}
 }
 
@@ -150,8 +123,8 @@ func TestRegistryRejectsDuplicateEnabledAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := Rule{ID: "one", Hosts: []string{"api.example.com"}, Port: 443, ProfileID: "openai", Enabled: true}
-	second := Rule{ID: "two", Hosts: []string{"api.example.com"}, Port: 443, ProfileID: "anthropic", Enabled: true}
+	first := Rule{ID: "one", Hosts: []string{"api.example.com:443"}, ProfileID: "openai", Enabled: true}
+	second := Rule{ID: "two", Hosts: []string{"api.example.com:443"}, ProfileID: "anthropic", Enabled: true}
 	if err := registry.Put(first); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +141,7 @@ func TestDisabledRuleDoesNotMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Put(Rule{ID: "disabled", Hosts: []string{"api.example.com"}, Port: 443, ProfileID: "openai", Enabled: false}); err != nil {
+	if err := registry.Put(Rule{ID: "disabled", Hosts: []string{"api.example.com:443"}, ProfileID: "openai", Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := registry.MatchAuthority("api.example.com:443"); ok {
@@ -182,10 +155,10 @@ func TestRegistryMatchesHostWildcards(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range []Rule{
-		{ID: "all", Hosts: []string{"*"}, Port: 443, ProfileID: "generic", Enabled: true},
-		{ID: "example", Hosts: []string{"*.example.com"}, Port: 443, ProfileID: "openai", Enabled: true},
-		{ID: "nested", Hosts: []string{"*.api.example.com"}, Port: 443, ProfileID: "openai", Enabled: true},
-		{ID: "exact", Hosts: []string{"special.api.example.com"}, Port: 443, ProfileID: "anthropic", Enabled: true},
+		{ID: "all", Hosts: []string{"*:443"}, ProfileID: "generic", Enabled: true},
+		{ID: "example", Hosts: []string{"*.example.com:443"}, ProfileID: "openai", Enabled: true},
+		{ID: "nested", Hosts: []string{"*.api.example.com:443"}, ProfileID: "openai", Enabled: true},
+		{ID: "exact", Hosts: []string{"special.api.example.com:443"}, ProfileID: "anthropic", Enabled: true},
 	} {
 		if err := registry.Put(item); err != nil {
 			t.Fatal(err)
@@ -215,7 +188,7 @@ func TestRegistryWildcardStillHonorsPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Put(Rule{ID: "https", Hosts: []string{"*"}, Port: 443, ProfileID: "openai", Enabled: true}); err != nil {
+	if err := registry.Put(Rule{ID: "https", Hosts: []string{"*:443"}, ProfileID: "openai", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := registry.MatchAuthority("api.example.com:8443"); ok {
@@ -229,7 +202,7 @@ func TestRegistryRejectsUnsupportedHostWildcards(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, host := range []string{"api.*.example.com", "example.*", "**.example.com"} {
-		item := Rule{ID: host, Hosts: []string{host}, Port: 443, ProfileID: "openai", Enabled: true}
+		item := Rule{ID: host, Hosts: []string{host + ":443"}, ProfileID: "openai", Enabled: true}
 		if err := registry.Put(item); err == nil {
 			t.Errorf("expected wildcard %q to be rejected", host)
 		}

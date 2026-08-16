@@ -59,7 +59,7 @@ func DefaultPolicySettings() PolicySettings {
 		{Type: "SECRET", Enabled: true},
 		{Type: "URL", Enabled: true},
 	}, Rules: []RuleConfig{
-		{ID: "EMAIL", Pattern: `(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b`, Enabled: true},
+		{ID: "SECRET_KEY", Pattern: `\bsk-(?:[A-Za-z0-9]+-)*[A-Za-z0-9_-]{16,}\b`, Enabled: true},
 	}}
 }
 

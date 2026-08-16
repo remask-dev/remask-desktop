@@ -79,6 +79,17 @@ func TestStoreInitializesSettingsFile(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsIncompletePersistedSettings(t *testing.T) {
+	directory := t.TempDir()
+	data := []byte(`{"record_request_content":true,"retention_days":30}`)
+	if err := os.WriteFile(filepath.Join(directory, "settings.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewStore(directory); err == nil {
+		t.Fatal("incomplete settings must not be filled from defaults")
+	}
+}
+
 func TestStoreUsesOneGenericExtraColumn(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
@@ -280,17 +291,12 @@ func TestStoreReturnsFieldsInStablePathOrder(t *testing.T) {
 	}
 	if err := store.Add(Entry{
 		UpstreamID: "test",
-		Fields:     []Field{{Path: "/placeholder"}},
+		Fields: []Field{
+			{Path: "/messages/10/content"},
+			{Path: "/messages/2/content"},
+			{Path: "/messages/1/content"},
+		},
 	}); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate a row written by an older Core version, before field ordering was
-	// normalized on write.
-	if _, err := store.db.Exec(`UPDATE audit_entries SET fields_json = ?`, `[
-		{"path":"/messages/10/content"},
-		{"path":"/messages/2/content"},
-		{"path":"/messages/1/content"}
-	]`); err != nil {
 		t.Fatal(err)
 	}
 

@@ -6,24 +6,17 @@ import (
 	"testing"
 )
 
-func TestRegistrySeedsBuiltinAIUpstreamsOnFirstInitialization(t *testing.T) {
+func TestRegistryStartsWithoutPresetUpstreams(t *testing.T) {
 	directory := t.TempDir()
 	registry, err := NewRegistry(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := registry.List()
-	expected := DefaultUpstreams()
-	if len(items) != len(expected) {
+	if items := registry.List(); len(items) != 0 {
 		t.Fatalf("unexpected preset upstreams: %#v", items)
 	}
-	for index := range expected {
-		if items[index] != expected[index] {
-			t.Fatalf("preset upstream %d = %#v, expected %#v", index, items[index], expected[index])
-		}
-	}
 	if _, err := os.Stat(filepath.Join(directory, "upstreams.json")); err != nil {
-		t.Fatalf("preset upstream was not persisted: %v", err)
+		t.Fatalf("empty upstream configuration was not persisted: %v", err)
 	}
 }
 
@@ -41,25 +34,10 @@ func TestRegistryDoesNotReplaceExistingConfiguration(t *testing.T) {
 	}
 }
 
-func TestRegistryMigratesLegacyOpenAIDefault(t *testing.T) {
+func TestRegistryDoesNotInferEnabledState(t *testing.T) {
 	directory := t.TempDir()
-	legacy := `[{"id":"openai","base_url":"https://api.openai.com","profile_id":"openai","credential_mode":"passthrough"}]`
-	if err := os.WriteFile(filepath.Join(directory, "upstreams.json"), []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	registry, err := NewRegistry(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if items := registry.List(); len(items) != len(DefaultUpstreams()) {
-		t.Fatalf("legacy defaults were not migrated: %#v", items)
-	}
-}
-
-func TestRegistryDefaultsLegacyEnabledStateAndPersistsDisabledState(t *testing.T) {
-	directory := t.TempDir()
-	legacy := `[{"id":"custom","base_url":"https://example.com","profile_id":"openai","credential_mode":"passthrough"}]`
-	if err := os.WriteFile(filepath.Join(directory, "upstreams.json"), []byte(legacy), 0o600); err != nil {
+	data := []byte(`[{"id":"custom","base_url":"https://example.com","profile_id":"openai","credential_mode":"passthrough"}]`)
+	if err := os.WriteFile(filepath.Join(directory, "upstreams.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	registry, err := NewRegistry(directory)
@@ -67,20 +45,11 @@ func TestRegistryDefaultsLegacyEnabledStateAndPersistsDisabledState(t *testing.T
 		t.Fatal(err)
 	}
 	item, err := registry.Get("custom")
-	if err != nil || !item.Enabled {
-		t.Fatalf("legacy upstream should default to enabled: %#v, %v", item, err)
-	}
-	item.Enabled = false
-	if err := registry.Put(item); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := NewRegistry(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err = reloaded.Get("custom")
-	if err != nil || item.Enabled {
-		t.Fatalf("disabled upstream was not persisted: %#v, %v", item, err)
+	if item.Enabled {
+		t.Fatalf("missing enabled field was inferred as true: %#v", item)
 	}
 }
 
@@ -90,7 +59,7 @@ func TestRegistryPersistsUpstreamsAndMasksHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := Upstream{ID: "managed", BaseURL: "https://example.com", ProfileID: "openai", CredentialMode: "managed", APIKey: "secret"}
+	item := Upstream{ID: "managed", BaseURL: "https://example.com", ProfileID: "openai", CredentialMode: "managed", APIKey: "secret", Enabled: true}
 	if err := registry.Put(item); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +81,7 @@ func TestRegistryRemovesManagedHeadersWhenSwitchingToPassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := Upstream{ID: "service", BaseURL: "https://example.com", ProfileID: "openai", CredentialMode: "managed", APIKey: "secret"}
+	item := Upstream{ID: "service", BaseURL: "https://example.com", ProfileID: "openai", CredentialMode: "managed", APIKey: "secret", Enabled: true}
 	if err := registry.Put(item); err != nil {
 		t.Fatal(err)
 	}

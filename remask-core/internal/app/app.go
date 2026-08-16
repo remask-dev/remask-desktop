@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/remask/remask-core/internal/audit"
@@ -134,7 +131,7 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize upstream registry: %w", err)
 	}
-	proxyRules, err := proxyrule.NewRegistryWithDefaults(options.DataDir, proxyRulesFromUpstreams(upstreams.List()))
+	proxyRules, err := proxyrule.NewRegistry(options.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("initialize proxy rule registry: %w", err)
 	}
@@ -150,34 +147,6 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 		handler: handler, proxyHandler: httpapi.NewProxyRouter(logger, proxy),
 		forwardProxyHandler: forward, proxyAuthority: authority,
 	}, nil
-}
-
-func proxyRulesFromUpstreams(items []upstream.Upstream) []proxyrule.Rule {
-	result := make([]proxyrule.Rule, 0, len(items))
-	seen := make(map[string]bool)
-	for _, item := range items {
-		parsed, err := url.Parse(item.BaseURL)
-		if err != nil || parsed.Hostname() == "" {
-			continue
-		}
-		port := 80
-		if parsed.Scheme == "https" {
-			port = 443
-		}
-		if parsed.Port() != "" {
-			if configured, parseErr := strconv.Atoi(parsed.Port()); parseErr == nil {
-				port = configured
-			}
-		}
-		host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
-		key := host + ":" + strconv.Itoa(port)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		result = append(result, proxyrule.Rule{ID: item.ID, Hosts: []string{host}, Port: port, ProfileID: item.ProfileID, Enabled: true})
-	}
-	return result
 }
 
 func startupModelID(configured string, selectionStore *model.SelectionStore, packages []model.Package) (string, error) {

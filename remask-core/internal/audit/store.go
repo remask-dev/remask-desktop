@@ -447,7 +447,6 @@ func (s *Store) List(query Query) []Entry {
 		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 		_ = json.Unmarshal([]byte(fields), &entry.Fields)
 		entry.Extra, entry.Debug = unmarshalExtra(extra)
-		sortFields(entry.Fields)
 		result = append(result, entry)
 	}
 	return result
@@ -521,7 +520,6 @@ func (s *Store) Get(id string) (Entry, bool) {
 	entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 	_ = json.Unmarshal([]byte(fields), &entry.Fields)
 	entry.Extra, entry.Debug = unmarshalExtra(extra)
-	sortFields(entry.Fields)
 	return entry, true
 }
 
@@ -684,25 +682,9 @@ func (s *Store) loadSettings() error {
 	if err != nil {
 		return err
 	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return err
-	}
-	if settings.MaxInferenceTokens == 0 {
-		settings.MaxInferenceTokens = DefaultSettings().MaxInferenceTokens
-	}
-	if _, exists := raw["entity_cache_enabled"]; !exists {
-		settings.EntityCacheEnabled = DefaultSettings().EntityCacheEnabled
-	}
-	if _, exists := raw["entity_cache_ttl_seconds"]; !exists || settings.EntityCacheTTLSeconds == 0 {
-		settings.EntityCacheTTLSeconds = DefaultSettings().EntityCacheTTLSeconds
-	}
-	if strings.TrimSpace(settings.InferenceProvider) == "" {
-		settings.InferenceProvider = DefaultSettings().InferenceProvider
 	}
 	if err := settings.Validate(); err != nil {
 		return err
