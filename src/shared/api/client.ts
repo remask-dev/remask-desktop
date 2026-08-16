@@ -1,16 +1,22 @@
-import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
+import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, ProxyRule, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
 
 const trim = (value: string) => value.trim().replace(/\/$/, "");
 export const connection = {
-  core: () => "http://127.0.0.1:17680",
+  core: () => import.meta.env.VITE_CORE_URL || "http://127.0.0.1:17680",
   proxyPort: () => {
     const stored = localStorage.getItem("remask.gatewayPort");
-    return stored ? Number(stored) || 17681 : 17681;
+    const fallback = Number(import.meta.env.VITE_GATEWAY_PORT) || 17681;
+    return stored ? Number(stored) || fallback : fallback;
   },
   proxy: () => `http://127.0.0.1:${connection.proxyPort()}`,
-  forwardProxyPort: () => 17682,
+  forwardProxyPort: () => {
+    const stored = localStorage.getItem("remask.forwardProxyPort");
+    const fallback = Number(import.meta.env.VITE_FORWARD_PROXY_PORT) || 17682;
+    return stored ? Number(stored) || fallback : fallback;
+  },
   forwardProxy: () => `http://127.0.0.1:${connection.forwardProxyPort()}`,
-  saveGatewayPort(port: number) { localStorage.setItem("remask.gatewayPort", String(port)); }
+  saveGatewayPort(port: number) { localStorage.setItem("remask.gatewayPort", String(port)); },
+  saveForwardProxyPort(port: number) { localStorage.setItem("remask.forwardProxyPort", String(port)); },
 };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -90,6 +96,14 @@ function normalizeUpstream(value: Record<string, unknown>): Upstream {
     credential_mode: value.credential_mode === "managed" ? "managed" : "passthrough",
     api_key: optionalText(value.api_key),
     header_templates: stringRecord(value.header_templates),
+    enabled: boolean(value.enabled, true),
+  };
+}
+
+function normalizeProxyRule(value: Record<string, unknown>): ProxyRule {
+  return {
+    id: text(value.id), hosts: stringList(value.hosts), port: number(value.port) || undefined,
+    profile_id: text(value.profile_id), enabled: boolean(value.enabled),
   };
 }
 
@@ -219,6 +233,7 @@ export const coreApi = {
   },
   profiles: async () => { const raw = await request<unknown>("/api/v1/profiles"); return records(isRecord(raw) ? raw.profiles : undefined).map(normalizeProfile); },
   upstreams: async () => { const raw = await request<unknown>("/api/v1/upstreams"); return records(isRecord(raw) ? raw.upstreams : undefined).map(normalizeUpstream); },
+  proxyRules: async () => { const raw = await request<unknown>("/api/v1/proxy-rules"); return records(isRecord(raw) ? raw.proxy_rules : undefined).map(normalizeProxyRule); },
   models: async () => { const raw = await request<unknown>("/api/v1/models"); const value = isRecord(raw) ? raw : {}; return { models: records(value.models).map(normalizeModel), runtime: normalizeRuntime(value.runtime) }; },
   activeModel: async () => {
     const raw = await request<unknown>("/api/v1/models/active");
@@ -235,6 +250,8 @@ export const coreApi = {
   savePolicy: async (policy: PolicySettings) => normalizePolicy(await request<unknown>("/api/v1/policy", { method: "PUT", body: JSON.stringify(policy) })),
   putUpstream: (item: Upstream, editing: boolean) => request<Upstream>(editing ? `/api/v1/upstreams/${encodeURIComponent(item.id)}` : "/api/v1/upstreams", { method: editing ? "PUT" : "POST", body: JSON.stringify(item) }),
   deleteUpstream: (id: string) => request<void>(`/api/v1/upstreams/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  putProxyRule: (item: ProxyRule, editing: boolean) => request<ProxyRule>(editing ? `/api/v1/proxy-rules/${encodeURIComponent(item.id)}` : "/api/v1/proxy-rules", { method: editing ? "PUT" : "POST", body: JSON.stringify(item) }),
+  deleteProxyRule: (id: string) => request<void>(`/api/v1/proxy-rules/${encodeURIComponent(id)}`, { method: "DELETE" }),
   scanModels: async () => { const raw = await request<unknown>("/api/v1/models/scan", { method: "POST", body: "{}" }); return { models: records(isRecord(raw) ? raw.models : undefined).map(normalizeModel) }; },
   downloadModel: (input: ModelDownloadRequest) => request<{operation_id: string; model_id: string}>("/api/v1/models/download", { method: "POST", body: JSON.stringify(input) }),
   activateModel: (id: string) => request<{operation_id: string}>(`/api/v1/models/${encodeURIComponent(id)}/activate`, { method: "POST", body: "{}" }),

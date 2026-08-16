@@ -1,15 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
-import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { AppWindow, Bot, Terminal } from "lucide-react";
+import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
 import { connection, coreApi } from "../../shared/api/client";
-import type { AuditSettings, PolicySettings, ProxyCAStatus, Upstream } from "../../shared/api/types";
+import type { AuditSettings, PolicySettings } from "../../shared/api/types";
 import { useApp } from "../../app/AppContext";
 import { queryKeys, useSettingsData } from "../../app/useCore";
 import { useI18n } from "../../shared/i18n/I18n";
-import type { MessageKey } from "../../shared/i18n/messages";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Input } from "../../shared/ui/Input";
@@ -18,37 +15,31 @@ import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
-type SystemCertificateStatus = { supported: boolean; installed: boolean; platform: string };
-type AIClient = "claude" | "codex";
 
-type SettingsData = { settings: AuditSettings; policy: PolicySettings; upstreams: Upstream[]; proxyCA: ProxyCAStatus };
+type SettingsData = { settings: AuditSettings; policy: PolicySettings };
 
 export function SettingsView() {
   const query = useSettingsData();
-  if (query.isPending || !query.settings || !query.policy || !query.upstreams || !query.proxyCA) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
-  return <SettingsContent data={{ settings: query.settings, policy: query.policy, upstreams: query.upstreams, proxyCA: query.proxyCA }}/>;
+  if (query.isPending || !query.settings || !query.policy) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
+  return <SettingsContent data={{ settings: query.settings, policy: query.policy }}/>;
 }
 
 function SettingsContent({ data }: { data: SettingsData }) {
   const { t, locale, setLocale } = useI18n();
   const { notify } = useApp();
   const qc = useQueryClient();
-  const [gatewayPort, setGatewayPort] = useState(connection.proxyPort());
   const [audit, setAudit] = useState<AuditSettings>(data.settings);
   const [policy, setPolicy] = useState<PolicySettings>(data.policy);
   const [clear, setClear] = useState(false);
   const [hfBaseURL, setHFBaseURL] = useState(data.settings.hf_base_url || "");
   const [autostart, setAutostart] = useState(false);
   const [autostartReady, setAutostartReady] = useState(false);
-  const [certificateStatus, setCertificateStatus] = useState<SystemCertificateStatus | null>(null);
-  const [confirmCertificateInstall, setConfirmCertificateInstall] = useState(false);
+  const [apiGatewayPort, setAPIGatewayPort] = useState(connection.proxyPort());
+  const [httpProxyPort, setHTTPProxyPort] = useState(connection.forwardProxyPort());
 
   useEffect(() => {
     if (!inTauri) return;
     isAutostartEnabled().then(setAutostart).catch(() => {}).finally(() => setAutostartReady(true));
-    invoke<SystemCertificateStatus>("system_certificate_status").then(setCertificateStatus).catch(() => {
-      setCertificateStatus({ supported: false, installed: false, platform: "unknown" });
-    });
   }, []);
 
   async function toggleAutostart(next: boolean) {
@@ -71,48 +62,35 @@ function SettingsContent({ data }: { data: SettingsData }) {
     onSuccess: result => { setAudit(result.audit); qc.setQueryData(queryKeys.settings, result.audit); },
     onError: error => { setAudit(data.settings); notify(String(error)); },
   });
-  const saveGateway = useMutation({
-    mutationFn: async (port: number) => {
-      if (!Number.isInteger(port) || port < 1 || port > 65535 || port === 17680 || port === connection.forwardProxyPort()) throw new Error(t("gatewayPortInvalid"));
-      const previousPort = connection.proxyPort();
-      if (port === previousPort) return false;
-      if ("__TAURI_INTERNALS__" in window) {
+  const clearMutation = useMutation({ mutationFn: coreApi.clearLogs, onSuccess: () => { setClear(false); qc.invalidateQueries({ queryKey: ["core", "audit-logs"] }); } });
+  const saveGatewayPorts = useMutation({
+    mutationFn: async ({ apiPort, httpPort }: { apiPort: number; httpPort: number }) => {
+      const corePort = Number(new URL(connection.core()).port) || 80;
+      if (![apiPort, httpPort].every(port => Number.isInteger(port) && port >= 1 && port <= 65535) || apiPort === httpPort || apiPort === corePort || httpPort === corePort) throw new Error(t("gatewayPortInvalid"));
+      const previousAPI = connection.proxyPort();
+      const previousHTTP = connection.forwardProxyPort();
+      if (apiPort === previousAPI && httpPort === previousHTTP) return { restarted: false, apiPort, httpPort };
+      if (inTauri) {
         try {
-          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${port}`, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${apiPort}`, forwardProxyAddress: `127.0.0.1:${httpPort}` });
         } catch (error) {
-          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${previousPort}`, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${previousAPI}`, forwardProxyAddress: `127.0.0.1:${previousHTTP}` });
           throw error;
         }
       }
-      connection.saveGatewayPort(port);
-      return "__TAURI_INTERNALS__" in window;
+      return { restarted: inTauri, apiPort, httpPort };
     },
-    onSuccess: restarted => { window.setTimeout(() => qc.invalidateQueries({ queryKey: queryKeys.root }), restarted ? 700 : 0); notify(t(restarted ? "settingsSavedRestarted" : "settingsSaved")); },
-    onError: error => { setGatewayPort(connection.proxyPort()); notify(String(error)); },
-  });
-  const clearMutation = useMutation({ mutationFn: coreApi.clearLogs, onSuccess: () => { setClear(false); qc.invalidateQueries({ queryKey: ["core", "audit-logs"] }); } });
-  const installCertificate = useMutation({
-    mutationFn: () => invoke<SystemCertificateStatus>("install_system_certificate"),
-    onSuccess: status => { setCertificateStatus(status); setConfirmCertificateInstall(false); notify(t("certificateInstalled")); },
-    onError: error => notify(String(error)),
-  });
-  const launchClient = useMutation({
-    mutationFn: async (client: AIClient) => {
-      await ensureClientUpstreams(client, data.upstreams);
-      await invoke("launch_ai_client", { client, forwardProxyAddress: new URL(connection.forwardProxy()).host });
+    onSuccess: ({ restarted, apiPort, httpPort }) => {
+      connection.saveGatewayPort(apiPort);
+      connection.saveForwardProxyPort(httpPort);
+      window.setTimeout(() => void qc.invalidateQueries({ queryKey: queryKeys.root }), restarted ? 700 : 0);
+      notify(t(restarted ? "settingsSavedRestarted" : "settingsSaved"));
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: queryKeys.upstreams }); notify(t("clientLaunched")); },
-    onError: error => notify(String(error)),
-  });
-  const launchApp = useMutation({
-    mutationFn: async () => {
-      const appPath = await open({ multiple: false, directory: false, title: t("selectApplication") });
-      if (!appPath) return false;
-      await invoke("launch_app_with_proxy", { appPath, forwardProxyAddress: new URL(connection.forwardProxy()).host });
-      return true;
+    onError: error => {
+      setAPIGatewayPort(connection.proxyPort());
+      setHTTPProxyPort(connection.forwardProxyPort());
+      notify(String(error));
     },
-    onSuccess: launched => { if (launched) notify(t("appLaunched")); },
-    onError: error => notify(String(error)),
   });
 
   function updatePolicy(patch: Partial<PolicySettings>) {
@@ -125,21 +103,17 @@ function SettingsContent({ data }: { data: SettingsData }) {
     setAudit(next);
     saveAudit.mutate(next);
   }
-  function applyGatewayPort() { if (!saveGateway.isPending) saveGateway.mutate(gatewayPort); }
   function applyHFBaseURL() { const next = { ...audit, hf_base_url: hfBaseURL.trim() }; setAudit(next); saveAudit.mutate(next); }
+  function applyGatewayPorts() { if (!saveGatewayPorts.isPending) saveGatewayPorts.mutate({ apiPort: apiGatewayPort, httpPort: httpProxyPort }); }
 
   return <div className="settings-page"><div className="settings-grid">
-    <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
-      <SettingRow last label={t("gatewayPort")} description={t("gatewayPortSub")}><Input type="number" min={1} max={65535} value={gatewayPort} onChange={event => setGatewayPort(Number(event.target.value))} onBlur={applyGatewayPort} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
-    </SettingsSection>
-    {inTauri && <SettingsSection tone="integration" title={t("systemIntegration")} subtitle={t("systemIntegrationSub")}>
-      <SettingRow label={t("systemCertificate")} description={certificateStatusDescription(certificateStatus, t)}><div className="integration-actions"><span className={`integration-status ${certificateStatus?.installed ? "integration-status--ready" : ""}`}>{certificateStatus?.installed ? t("certificateInstalledStatus") : t("certificateNotInstalledStatus")}</span><Button variant="primary" disabled={!certificateStatus?.supported || certificateStatus.installed || installCertificate.isPending} onClick={() => setConfirmCertificateInstall(true)}>{certificateStatus?.installed ? t("certificateInstalledStatus") : t("installCertificate")}</Button></div></SettingRow>
-      <SettingRow label={t("quickLaunch")} description={t("quickLaunchSub")}><div className="integration-actions integration-actions--clients"><Button icon={<Bot size={14}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("claude")}>{t("launchClaude")}</Button><Button icon={<Terminal size={14}/>} disabled={launchClient.isPending} onClick={() => launchClient.mutate("codex")}>{t("launchCodex")}</Button></div></SettingRow>
-      <SettingRow last label={t("appProxyLaunch")} description={t("appProxyLaunchSub")}><div className="integration-actions"><Button variant="primary" icon={<AppWindow size={14}/>} disabled={launchApp.isPending} onClick={() => launchApp.mutate()}>{t("selectAndLaunchApp")}</Button></div></SettingRow>
-    </SettingsSection>}
     <SettingsSection tone="interface" title={t("interfaceSettings")} subtitle={t("interfaceSettingsSub")}>
       <SettingRow label={t("language")} description={locale === "zh" ? "简体中文" : "English"}><Select value={locale} onValueChange={value => setLocale(value as "zh" | "en")} options={[{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }]}/></SettingRow>
       {inTauri && <SettingRow last label={t("autostart")} description={t("autostartSub")}><Switch ariaLabel={t("autostart")} disabled={!autostartReady} checked={autostart} onCheckedChange={toggleAutostart}/></SettingRow>}
+    </SettingsSection>
+    <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
+      <SettingRow label={t("apiGatewayPort")} description={t("apiGatewayPortSub")}><Input type="number" min={1} max={65535} value={apiGatewayPort} onChange={event => setAPIGatewayPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
+      <SettingRow last label={t("httpProxyPort")} description={t("httpProxyPortSub")}><Input type="number" min={1} max={65535} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="models" title={t("modelDownloads")} subtitle={t("modelDownloadsSub")}>
       <SettingRow label={t("hfMirror")} description={t("hfMirrorSub")}><Input placeholder="https://huggingface.co" value={hfBaseURL} onChange={event => setHFBaseURL(event.target.value)} onBlur={applyHFBaseURL} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
@@ -157,46 +131,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
       <div className="settings-actions settings-actions--split"><Button variant="danger" onClick={() => setClear(true)}>{t("clearLogs")}</Button></div>
     </SettingsSection>
     <Dialog open={clear} title={t("confirmClear")} onClose={() => setClear(false)} footer={<><Button onClick={() => setClear(false)}>{t("cancel")}</Button><Button variant="danger" onClick={() => clearMutation.mutate()}>{t("confirm")}</Button></>}><p className="dialog-message">{t("clearLogs")}</p></Dialog>
-    <Dialog open={confirmCertificateInstall} title={t("certificateInstallConfirm")} onClose={() => setConfirmCertificateInstall(false)} footer={<><Button onClick={() => setConfirmCertificateInstall(false)}>{t("cancel")}</Button><Button variant="primary" disabled={installCertificate.isPending} onClick={() => installCertificate.mutate()}>{t("installCertificate")}</Button></>}><p className="dialog-message">{t("certificateInstallDescription")}</p>{data.proxyCA.fingerprint_sha256 && <code className="certificate-fingerprint">SHA-256 {data.proxyCA.fingerprint_sha256}</code>}</Dialog>
   </div></div>;
-}
-
-function certificateStatusDescription(status: SystemCertificateStatus | null, t: (key: MessageKey) => string) {
-  if (!status) return t("certificateChecking");
-  if (!status.supported) return t("certificateUnsupported");
-  return status.installed ? t("certificateInstalledSub") : t("certificateNotInstalledSub");
-}
-
-const clientUpstreams: Record<AIClient, Array<Pick<Upstream, "id" | "base_url" | "profile_id">>> = {
-  claude: [{ id: "anthropic", base_url: "https://api.anthropic.com", profile_id: "anthropic" }],
-  codex: [
-    { id: "openai", base_url: "https://api.openai.com", profile_id: "openai" },
-    { id: "chatgpt-codex", base_url: "https://chatgpt.com", profile_id: "codex-chatgpt" },
-  ],
-};
-
-async function ensureClientUpstreams(client: AIClient, configured: Upstream[]) {
-  const pending = [...configured];
-  for (const required of clientUpstreams[client]) {
-    const requiredHost = upstreamHost(required.base_url);
-    if (pending.some(item => upstreamHost(item.base_url) === requiredHost)) continue;
-    const id = availableUpstreamId(required.id, pending);
-    const item: Upstream = { ...required, id, credential_mode: "passthrough" };
-    await coreApi.putUpstream(item, false);
-    pending.push(item);
-  }
-}
-
-function upstreamHost(baseUrl: string) {
-  try { return new URL(baseUrl).hostname.toLowerCase(); } catch { return ""; }
-}
-
-function availableUpstreamId(preferred: string, configured: Upstream[]) {
-  const used = new Set(configured.map(item => item.id));
-  if (!used.has(preferred)) return preferred;
-  let suffix = 2;
-  while (used.has(`${preferred}-${suffix}`)) suffix += 1;
-  return `${preferred}-${suffix}`;
 }
 
 function SettingsSection({ tone, title, subtitle, children }: { tone: string; title: string; subtitle: string; children: React.ReactNode }) {
