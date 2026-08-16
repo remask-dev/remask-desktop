@@ -3,7 +3,7 @@ export interface VersionResponse { name: string; version: string; api_version: s
 export interface ProxyCAStatus { ready: boolean; certificate_path?: string; fingerprint_sha256: string }
 export interface Profile { id: string; name: string; operations: unknown[]; header_templates?: Record<string, string> }
 export interface Upstream { id: string; base_url: string; profile_id: string; credential_mode: "passthrough" | "managed"; api_key?: string; header_templates?: Record<string, string>; enabled: boolean }
-export interface ProxyRule { id: string; hosts: string[]; port?: number; profile_id: string; enabled: boolean }
+export interface ProxyRule { id: string; hosts: string[]; profile_id: string; enabled: boolean }
 export interface ModelManifest { name: string; version: string; quantization: string; max_tokens: number; stride: number; label_scheme: string; entity_types?: Record<string, string> }
 export interface ModelPackage { id: string; valid: boolean; active: boolean; built_in: boolean; manifest: ModelManifest; errors: string[] }
 export interface ActiveModel { id: string; name: string; version: string; runtime: string; quantization: string }

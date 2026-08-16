@@ -19,11 +19,14 @@ var ErrNotFound = errors.New("proxy rule not found")
 // destination itself always comes from the proxy request; a rule only selects
 // the protocol profile used by the protection pipeline.
 type Rule struct {
-	ID        string   `json:"id"`
-	Hosts     []string `json:"hosts"`
-	Port      int      `json:"port,omitempty"`
-	ProfileID string   `json:"profile_id"`
-	Enabled   bool     `json:"enabled"`
+	ID    string   `json:"id"`
+	Hosts []string `json:"hosts"`
+	// Port is retained only to migrate rules written by older versions. New
+	// rules encode an optional port in each Hosts entry (for example,
+	// "api.example.com:8443"); an entry without a port matches every port.
+	Port      int    `json:"port,omitempty"`
+	ProfileID string `json:"profile_id"`
+	Enabled   bool   `json:"enabled"`
 }
 
 func (r Rule) Validate() error {
@@ -31,24 +34,28 @@ func (r Rule) Validate() error {
 		return errors.New("invalid proxy rule id")
 	}
 	if len(r.Hosts) == 0 {
-		return errors.New("at least one host is required")
+		return errors.New("at least one target is required")
+	}
+	if r.Port < 0 || r.Port > 65535 {
+		return errors.New("target port must be between 1 and 65535")
 	}
 	seen := make(map[string]bool, len(r.Hosts))
-	for _, host := range r.Hosts {
-		host = normalizeHost(host)
+	for _, value := range r.Hosts {
+		target := normalizeTarget(value, r.Port)
+		host, _, _, err := parseTarget(target)
+		if err != nil {
+			return err
+		}
 		if host == "" || net.ParseIP(host) == nil && strings.ContainsAny(host, " /:@") {
-			return errors.New("hosts must contain DNS names or IP addresses")
+			return errors.New("targets must contain DNS names or IP addresses")
 		}
 		if strings.Contains(host, "*") && host != "*" && (!strings.HasPrefix(host, "*.") || strings.Count(host, "*") != 1 || len(host) <= 2) {
 			return errors.New("host wildcards must be * or start with *.")
 		}
-		if seen[host] {
-			return errors.New("hosts must be unique")
+		if seen[target] {
+			return errors.New("targets must be unique")
 		}
-		seen[host] = true
-	}
-	if r.Port < 0 || r.Port > 65535 {
-		return errors.New("port must be between 1 and 65535")
+		seen[target] = true
 	}
 	if strings.TrimSpace(r.ProfileID) == "" {
 		return errors.New("profile_id is required")
@@ -64,9 +71,9 @@ type Registry struct {
 
 func DefaultRules() []Rule {
 	return []Rule{
-		{ID: "anthropic-api", Hosts: []string{"api.anthropic.com"}, Port: 443, ProfileID: "anthropic", Enabled: true},
-		{ID: "chatgpt", Hosts: []string{"chatgpt.com"}, Port: 443, ProfileID: "codex-chatgpt", Enabled: true},
-		{ID: "openai-api", Hosts: []string{"api.openai.com"}, Port: 443, ProfileID: "openai", Enabled: true},
+		{ID: "anthropic-api", Hosts: []string{"api.anthropic.com:443"}, ProfileID: "anthropic", Enabled: true},
+		{ID: "chatgpt", Hosts: []string{"chatgpt.com:443"}, ProfileID: "codex-chatgpt", Enabled: true},
+		{ID: "openai-api", Hosts: []string{"api.openai.com:443"}, ProfileID: "openai", Enabled: true},
 	}
 }
 
@@ -110,7 +117,9 @@ func NewRegistryWithDefaults(dataDir string, defaults []Rule) (*Registry, error)
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
 	}
+	migrated := false
 	for _, item := range items {
+		migrated = migrated || item.Port != 0
 		item = normalizeRule(item)
 		if err := item.Validate(); err != nil {
 			return nil, err
@@ -122,6 +131,11 @@ func NewRegistryWithDefaults(dataDir string, defaults []Rule) (*Registry, error)
 	}
 	if err := registry.validateAuthoritiesLocked(); err != nil {
 		return nil, err
+	}
+	if migrated {
+		if err := registry.persistLocked(); err != nil {
+			return nil, err
+		}
 	}
 	return registry, nil
 }
@@ -175,16 +189,20 @@ func (r *Registry) MatchAuthority(authority string) (Rule, bool) {
 	var best Rule
 	bestHostKind, bestHostLength, bestPortKind := 0, 0, 0
 	for _, item := range r.List() {
-		if !item.Enabled || item.Port != 0 && port != 0 && item.Port != port {
+		if !item.Enabled {
 			continue
 		}
-		for _, candidate := range item.Hosts {
+		for _, target := range item.Hosts {
+			candidate, candidatePort, _, _ := parseTarget(target)
+			if candidatePort != 0 && candidatePort != port {
+				continue
+			}
 			hostKind, hostLength, matched := matchHost(candidate, host)
 			if !matched {
 				continue
 			}
 			portKind := 0
-			if item.Port != 0 {
+			if candidatePort != 0 {
 				portKind = 1
 			}
 			if hostKind > bestHostKind ||
@@ -234,10 +252,10 @@ func (r *Registry) validateAuthoritiesLocked() error {
 		if !item.Enabled {
 			continue
 		}
-		for _, host := range item.Hosts {
-			key := normalizeHost(host) + ":" + strconv.Itoa(item.Port)
+		for _, target := range item.Hosts {
+			key := target
 			if owner, exists := owners[key]; exists && owner != item.ID {
-				return errors.New("enabled proxy rule authorities must be unique")
+				return errors.New("enabled proxy rule targets must be unique")
 			}
 			owners[key] = item.ID
 		}
@@ -269,8 +287,9 @@ func normalizeRule(item Rule) Rule {
 	item.ID = strings.TrimSpace(item.ID)
 	item.ProfileID = strings.TrimSpace(item.ProfileID)
 	for index := range item.Hosts {
-		item.Hosts[index] = normalizeHost(item.Hosts[index])
+		item.Hosts[index] = normalizeTarget(item.Hosts[index], item.Port)
 	}
+	item.Port = 0
 	sort.Strings(item.Hosts)
 	return item
 }
@@ -291,6 +310,73 @@ func splitAuthority(authority string) (string, int) {
 		port, _ = strconv.Atoi(parsed.Port())
 	}
 	return normalizeHost(parsed.Hostname()), port
+}
+
+func parseTarget(target string) (host string, port int, hasPort bool, err error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", 0, false, errors.New("targets must not be empty")
+	}
+
+	if strings.HasPrefix(target, "[") {
+		closing := strings.IndexByte(target, ']')
+		if closing < 0 {
+			return "", 0, false, errors.New("invalid bracketed target")
+		}
+		host = normalizeHost(target[1:closing])
+		remainder := target[closing+1:]
+		if remainder == "" {
+			if net.ParseIP(host) == nil {
+				return "", 0, false, errors.New("brackets are only valid for IPv6 targets")
+			}
+			return host, 0, false, nil
+		}
+		if !strings.HasPrefix(remainder, ":") || len(remainder) == 1 {
+			return "", 0, false, errors.New("invalid target port")
+		}
+		port, err = parseTargetPort(remainder[1:])
+		return host, port, true, err
+	}
+
+	if net.ParseIP(target) != nil {
+		return normalizeHost(target), 0, false, nil
+	}
+	switch strings.Count(target, ":") {
+	case 0:
+		return normalizeHost(target), 0, false, nil
+	case 1:
+		separator := strings.LastIndexByte(target, ':')
+		host = normalizeHost(target[:separator])
+		port, err = parseTargetPort(target[separator+1:])
+		return host, port, true, err
+	default:
+		return "", 0, false, errors.New("IPv6 targets with a port must use [address]:port")
+	}
+}
+
+func parseTargetPort(value string) (int, error) {
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, errors.New("target port must be between 1 and 65535")
+	}
+	return port, nil
+}
+
+func normalizeTarget(target string, legacyPort int) string {
+	host, port, hasPort, err := parseTarget(target)
+	if err != nil {
+		return strings.TrimSpace(target)
+	}
+	if !hasPort && legacyPort != 0 {
+		port = legacyPort
+	}
+	if port == 0 {
+		return host
+	}
+	if strings.Contains(host, ":") {
+		return net.JoinHostPort(host, strconv.Itoa(port))
+	}
+	return host + ":" + strconv.Itoa(port)
 }
 
 func normalizeHost(host string) string {

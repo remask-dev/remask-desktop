@@ -738,12 +738,8 @@ main {
 .test-pane--source textarea,
 .test-output pre,
 .annotated-result {
-  font-size: 13px;
-  line-height: 1.8;
-}
-
-.test-pane--source textarea {
   font-size: 11px;
+  line-height: 1.8;
 }
 
 .result-entity small {
