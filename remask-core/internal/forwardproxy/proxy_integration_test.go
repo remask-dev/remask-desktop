@@ -1,6 +1,7 @@
 package forwardproxy_test
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -26,7 +27,11 @@ func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	application := newTestApp(t, upstreamServer.Client())
+	var logs bytes.Buffer
+	application, err := app.NewWithHTTPClient(log.New(&logs, "", 0), upstreamServer.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
 	configureUpstream(t, application.Handler(), upstreamServer.URL)
 	proxyServer := httptest.NewServer(application.ForwardProxyHandler())
 	defer proxyServer.Close()
@@ -45,6 +50,10 @@ func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "foo@example.com") || strings.Contains(string(body), "<MASK_EMAIL:") {
 		t.Fatalf("response was not restored: %s", body)
+	}
+	if !strings.Contains(logs.String(), `forward_proxy_request method=CONNECT target="`+request.URL.Host+`" path="-"`) ||
+		!strings.Contains(logs.String(), `forward_proxy_request method=POST target="`+request.URL.Host+`" path="/v1/chat/completions"`) {
+		t.Fatalf("HTTPS proxy requests were not logged: %q", logs.String())
 	}
 }
 
@@ -99,6 +108,48 @@ func TestUnconfiguredHTTPSIsRawTunnel(t *testing.T) {
 	body, _ := io.ReadAll(response.Body)
 	if string(body) != "raw tunnel" {
 		t.Fatalf("unexpected tunneled response: %q", body)
+	}
+}
+
+func TestForwardProxyLogsHTTPRequestsWithoutQueryValues(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstreamServer.Close()
+
+	var output bytes.Buffer
+	application, err := app.NewWithHTTPClient(log.New(&output, "", 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, upstreamServer.URL+"/safe/path?api_key=do-not-log", nil)
+	response := httptest.NewRecorder()
+	application.ForwardProxyHandler().ServeHTTP(response, request)
+
+	logged := output.String()
+	if !strings.Contains(logged, `forward_proxy_request method=GET target="`+request.URL.Host+`" path="/safe/path"`) {
+		t.Fatalf("forward proxy request was not logged safely: %q", logged)
+	}
+	if strings.Contains(logged, "do-not-log") || strings.Contains(logged, "api_key") {
+		t.Fatalf("forward proxy log exposed query data: %q", logged)
+	}
+}
+
+func TestForwardProxyLogsConnectRequests(t *testing.T) {
+	var output bytes.Buffer
+	application, err := app.NewWithHTTPClient(log.New(&output, "", 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodConnect, "http://proxy.invalid", nil)
+	request.Host = "example.com:443"
+	request.URL.Host = ""
+	response := httptest.NewRecorder()
+	application.ForwardProxyHandler().ServeHTTP(response, request)
+
+	logged := output.String()
+	if !strings.Contains(logged, `forward_proxy_request method=CONNECT target="example.com:443" path="-"`) {
+		t.Fatalf("CONNECT request was not logged: %q", logged)
 	}
 }
 

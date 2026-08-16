@@ -488,7 +488,8 @@ Profile 匹配规则：
 - `passthrough` 模式按 Profile 允许列表转发调用方原有认证 Header；`managed` 模式由 Upstream 配置注入凭据，并禁止客户端覆盖受保护 Header。
 - 不向上游转发本地控制 Token 和 `X-Remask-*` 内部 Header。
 - 修改 body 后移除旧 `Content-Length`、`ETag` 和内容摘要 Header。
-- SSE 请求优先使用 `Accept-Encoding: identity`，首版不在压缩流中做转换。
+- `Content-Encoding: gzip` 的受保护 JSON 请求先解压并按解压后大小检查，脱敏后重新 gzip；无法识别的内容编码保持透传。
+- 上游请求使用 `Accept-Encoding: identity`，不在压缩响应流中做转换。
 
 ## 12. SSE 处理
 

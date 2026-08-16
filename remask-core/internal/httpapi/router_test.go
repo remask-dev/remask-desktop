@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"log"
@@ -111,9 +112,132 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 	}
 	detailResponse := httptest.NewRecorder()
 	handler.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs/"+listed.Logs[0].ID, nil))
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("gzip audit detail: %d %s", detailResponse.Code, detailResponse.Body.String())
+	}
 	detailBody := detailResponse.Body.String()
 	if detailResponse.Code != http.StatusOK || strings.Contains(detailBody, "foo@example.com") || !strings.Contains(detailBody, "foo***com") || !strings.Contains(detailBody, `\u003cMASK_EMAIL:`) {
 		t.Fatalf("audit detail was not safely masked: %d %s", detailResponse.Code, detailBody)
+	}
+}
+
+func TestGzipJSONProxyRedactsAndRecompressesRequest(t *testing.T) {
+	var upstreamBody []byte
+	var upstreamEncoding string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		upstreamEncoding = r.Header.Get("Content-Encoding")
+		compressed, _ := io.ReadAll(r.Body)
+		reader, err := gzip.NewReader(bytes.NewReader(compressed))
+		if err != nil {
+			t.Fatalf("open upstream gzip body: %v", err)
+		}
+		upstreamBody, err = io.ReadAll(reader)
+		if err != nil {
+			t.Fatalf("read upstream gzip body: %v", err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatalf("close upstream gzip body: %v", err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			Request:    r,
+		}, nil
+	})}
+
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	settings := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"audit":{"record_request_content":true,"debug":true,"retention_days":30,"max_inference_tokens":512,"inference_provider":"cpu","entity_cache_enabled":true,"entity_cache_ttl_seconds":300}}`))
+	settings.Header.Set("Content-Type", "application/json")
+	settingsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(settingsResponse, settings)
+	if settingsResponse.Code != http.StatusOK {
+		t.Fatalf("enable debug mode: %d %s", settingsResponse.Code, settingsResponse.Body.String())
+	}
+	body := gzipTestBody(t, `{"model":"custom-model","messages":[{"role":"user","content":"foo@example.com"}]}`)
+	request := httptest.NewRequest(http.MethodPost, "/custom-model-endpoint", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("gzip proxy response: %d %s", response.Code, response.Body.String())
+	}
+	if upstreamEncoding != "gzip" {
+		t.Fatalf("upstream content encoding = %q, want gzip", upstreamEncoding)
+	}
+	if strings.Contains(string(upstreamBody), "foo@example.com") || !strings.Contains(string(upstreamBody), "<MASK_EMAIL:") {
+		t.Fatalf("upstream received unredacted gzip content: %s", upstreamBody)
+	}
+
+	logsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logsResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs?limit=1", nil))
+	var listed struct {
+		Logs []struct {
+			ID string `json:"id"`
+		} `json:"logs"`
+	}
+	if err := json.Unmarshal(logsResponse.Body.Bytes(), &listed); err != nil || len(listed.Logs) != 1 {
+		t.Fatalf("decode gzip audit list: %v body=%s", err, logsResponse.Body.String())
+	}
+	detailResponse := httptest.NewRecorder()
+	handler.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs/"+listed.Logs[0].ID, nil))
+	var detail struct {
+		Log struct {
+			Debug *struct {
+				Request struct {
+					Headers map[string][]string `json:"headers"`
+					Body    string              `json:"body"`
+				} `json:"request"`
+			} `json:"debug"`
+		} `json:"log"`
+	}
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode gzip audit detail: %v body=%s", err, detailResponse.Body.String())
+	}
+	if detail.Log.Debug == nil || !strings.Contains(detail.Log.Debug.Request.Body, "foo@example.com") || http.Header(detail.Log.Debug.Request.Headers).Get("Content-Encoding") != "" {
+		t.Fatalf("gzip debug request was not stored decoded: %#v body=%s", detail.Log.Debug, detailResponse.Body.String())
+	}
+}
+
+func TestProtectedRouteRejectsInvalidGzipRequest(t *testing.T) {
+	upstreamCalled := false
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		upstreamCalled = true
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader("not-gzip"))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest || upstreamCalled || !strings.Contains(response.Body.String(), "REQUEST_BODY_INVALID") {
+		t.Fatalf("invalid gzip response=%d called=%v body=%s", response.Code, upstreamCalled, response.Body.String())
+	}
+}
+
+func TestProtectedRouteRejectsOversizedDecompressedGzipRequest(t *testing.T) {
+	upstreamCalled := false
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		upstreamCalled = true
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	})}
+	handler := testHandlerWithClient(t, client)
+	configureUpstream(t, handler)
+	body := gzipTestBody(t, `{"messages":[{"role":"user","content":"`+strings.Repeat("x", 9<<20)+`"}]}`)
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusRequestEntityTooLarge || upstreamCalled || !strings.Contains(response.Body.String(), "REQUEST_BODY_INVALID") {
+		t.Fatalf("oversized gzip response=%d called=%v body=%s", response.Code, upstreamCalled, response.Body.String())
 	}
 }
 
@@ -621,6 +745,19 @@ func configureUpstream(t *testing.T, handler http.Handler) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("configure upstream: %d %s", response.Code, response.Body.String())
 	}
+}
+
+func gzipTestBody(t *testing.T, body string) []byte {
+	t.Helper()
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	if _, err := writer.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return compressed.Bytes()
 }
 
 func testHandler(t *testing.T) http.Handler {

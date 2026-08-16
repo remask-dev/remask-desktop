@@ -52,6 +52,122 @@ pub fn launch_client(
     platform_launch_client(executable, &proxy_url, &path)
 }
 
+pub fn launch_app(
+    app: &AppHandle,
+    selected_path: &str,
+    forward_proxy_address: &str,
+) -> Result<(), String> {
+    let proxy_url = validated_proxy_url(forward_proxy_address)?;
+    let certificate = certificate_path(app)?;
+    validate_certificate(&certificate)?;
+    let selected_path = canonical_app_path(selected_path)?;
+    platform_launch_app(&selected_path, &proxy_url, &certificate)
+}
+
+fn canonical_app_path(selected_path: &str) -> Result<PathBuf, String> {
+    let selected_path = selected_path.trim();
+    if selected_path.is_empty() {
+        return Err("application path is empty".into());
+    }
+    let path = PathBuf::from(selected_path);
+    if !path.is_absolute() {
+        return Err("application path must be absolute".into());
+    }
+    path.canonicalize()
+        .map_err(|error| format!("cannot open selected application: {error}"))
+}
+
+fn spawn_app_with_proxy(
+    executable: &Path,
+    proxy_url: &str,
+    certificate: &Path,
+) -> Result<(), String> {
+    let mut command = Command::new(executable);
+    command
+        .env("HTTP_PROXY", proxy_url)
+        .env("HTTPS_PROXY", proxy_url)
+        .env("http_proxy", proxy_url)
+        .env("https_proxy", proxy_url)
+        .env("ALL_PROXY", proxy_url)
+        .env("all_proxy", proxy_url)
+        .env("NODE_EXTRA_CA_CERTS", certificate)
+        .env("SSL_CERT_FILE", certificate)
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost");
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("launch selected application: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn platform_launch_app(
+    selected_path: &Path,
+    proxy_url: &str,
+    certificate: &Path,
+) -> Result<(), String> {
+    let executable = if selected_path.is_dir()
+        && selected_path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+    {
+        macos_bundle_executable(selected_path)?
+    } else if selected_path.is_file() {
+        selected_path.to_path_buf()
+    } else {
+        return Err("select a macOS application bundle or executable file".into());
+    };
+    spawn_app_with_proxy(&executable, proxy_url, certificate)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_bundle_executable(bundle: &Path) -> Result<PathBuf, String> {
+    let info_plist = bundle.join("Contents").join("Info.plist");
+    let output = Command::new("/usr/bin/plutil")
+        .args(["-extract", "CFBundleExecutable", "raw", "-o", "-"])
+        .arg(&info_plist)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(command_error("read application bundle metadata", &output));
+    }
+    let executable_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if executable_name.is_empty()
+        || Path::new(&executable_name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(executable_name.as_str())
+    {
+        return Err("application bundle contains an invalid executable name".into());
+    }
+    let executable = bundle.join("Contents").join("MacOS").join(executable_name);
+    if !executable.is_file() {
+        return Err("application bundle executable was not found".into());
+    }
+    Ok(executable)
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn platform_launch_app(
+    selected_path: &Path,
+    proxy_url: &str,
+    certificate: &Path,
+) -> Result<(), String> {
+    if !selected_path.is_file() {
+        return Err("select an executable application file".into());
+    }
+    spawn_app_with_proxy(selected_path, proxy_url, certificate)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn platform_launch_app(
+    _selected_path: &Path,
+    _proxy_url: &str,
+    _certificate: &Path,
+) -> Result<(), String> {
+    Err("application proxy launch is not supported on this platform".into())
+}
+
 fn client_executable(client: &str) -> Result<&'static str, String> {
     match client {
         "claude" => Ok("claude"),
@@ -423,6 +539,12 @@ mod tests {
         assert_eq!(client_executable("claude").unwrap(), "claude");
         assert_eq!(client_executable("codex").unwrap(), "codex");
         assert!(client_executable("sh").is_err());
+    }
+
+    #[test]
+    fn selected_application_path_must_be_absolute() {
+        assert!(canonical_app_path("relative/application").is_err());
+        assert!(canonical_app_path("").is_err());
     }
 
     #[cfg(target_os = "macos")]

@@ -44,6 +44,8 @@ func New(logger *log.Logger, upstreams *upstream.Registry, gateway *gateway.Gate
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	p.logRequest(r)
+
 	if r.Method == http.MethodConnect {
 		p.serveConnect(w, r)
 		return
@@ -128,6 +130,7 @@ func (p *Proxy) inspectTLS(w http.ResponseWriter, r *http.Request, authority str
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 		Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			p.logRequest(request)
 			if !sameHostname(request.Host, host) {
 				http.Error(response, "CONNECT target and request host differ", http.StatusMisdirectedRequest)
 				return
@@ -204,6 +207,25 @@ func requestAuthority(r *http.Request) string {
 		return r.URL.Host
 	}
 	return r.Host
+}
+
+func (p *Proxy) logRequest(r *http.Request) {
+	p.logger.Printf(
+		"forward_proxy_request method=%s target=%q path=%q",
+		r.Method,
+		requestAuthority(r),
+		requestLogPath(r),
+	)
+}
+
+func requestLogPath(r *http.Request) string {
+	if r.Method == http.MethodConnect {
+		return "-"
+	}
+	if r.URL == nil || r.URL.Path == "" {
+		return "/"
+	}
+	return r.URL.EscapedPath()
 }
 
 func connectAuthority(authority string) string {

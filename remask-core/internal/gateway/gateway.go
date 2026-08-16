@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,8 +97,10 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	debug := g.DebugMode()
 	counted := &countingResponseWriter{ResponseWriter: w}
 	var requestBody bytes.Buffer
+	var requestHeaders http.Header
 	if debug {
 		counted.capture = &bytes.Buffer{}
+		requestHeaders = r.Header.Clone()
 	}
 	w = counted
 	operationErr := profile.ErrNoMatch
@@ -133,7 +136,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 			auditEntry.Debug = &audit.DebugExchange{
 				Request: audit.DebugRequest{
 					Method: r.Method, URL: r.URL.RequestURI(),
-					Headers: map[string][]string(r.Header.Clone()), Body: requestBody.String(),
+					Headers: map[string][]string(requestHeaders), Body: requestBody.String(),
 				},
 				Response: audit.DebugResponse{
 					Status: counted.StatusCode(), Headers: map[string][]string(counted.Header().Clone()),
@@ -146,9 +149,9 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		}
 	}()
 
-	body, err := readBody(r.Body, maxBodyBytes)
+	wireBody, err := readBody(r.Body, maxBodyBytes)
 	if debug {
-		_, _ = requestBody.Write(body)
+		_, _ = requestBody.Write(wireBody)
 	}
 	if err != nil {
 		if errors.Is(err, errBodyTooLarge) {
@@ -157,23 +160,37 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 			if r.ContentLength > 0 {
 				auditEntry.RequestBytes = r.ContentLength
 			} else {
-				auditEntry.RequestBytes = int64(len(body))
+				auditEntry.RequestBytes = int64(len(wireBody))
 			}
 			remaining := io.Reader(r.Body)
 			if debug {
 				remaining = io.TeeReader(remaining, &requestBody)
 			}
-			g.serveOversizedPassthrough(w, r, configured, upstreamPath, io.MultiReader(bytes.NewReader(body), remaining), &auditEntry)
+			g.serveOversizedPassthrough(w, r, configured, upstreamPath, io.MultiReader(bytes.NewReader(wireBody), remaining), &auditEntry)
 			return
 		}
 		writeProxyError(w, http.StatusRequestEntityTooLarge, "REQUEST_BODY_INVALID", err.Error())
 		return
 	}
-	auditEntry.RequestBytes = int64(len(body))
-	if model := extractModelFromBody(body); model != "" {
-		auditEntry.Model = model
+	auditEntry.RequestBytes = int64(len(wireBody))
+	contentEncoding := strings.TrimSpace(strings.ToLower(r.Header.Get("Content-Encoding")))
+	body := wireBody
+	var decodingErr error
+	if contentEncoding == "gzip" {
+		body, decodingErr = decodeGzipBody(wireBody, maxBodyBytes)
+		if decodingErr == nil && debug {
+			requestBody.Reset()
+			_, _ = requestBody.Write(body)
+			requestHeaders.Del("Content-Encoding")
+			requestHeaders.Del("Content-Length")
+		}
 	}
-	if operationErr != nil && isJSON(r.Header.Get("Content-Type")) {
+	if decodingErr == nil {
+		if model := extractModelFromBody(body); model != "" {
+			auditEntry.Model = model
+		}
+	}
+	if decodingErr == nil && operationErr != nil && isJSON(r.Header.Get("Content-Type")) {
 		if fallback, fallbackErr := profile.GenericMatch(r.Method, body); fallbackErr == nil {
 			operation = fallback
 			operationErr = nil
@@ -188,8 +205,16 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		}
 	}
 	passthrough = operationErr != nil || operation.Passthrough || !g.rules.Enabled()
-	contentEncoding := strings.TrimSpace(strings.ToLower(r.Header.Get("Content-Encoding")))
-	if !passthrough && (len(body) == 0 || !isJSON(r.Header.Get("Content-Type")) || !json.Valid(body) || (contentEncoding != "" && contentEncoding != "identity")) {
+	if !passthrough && decodingErr != nil {
+		auditEntry.ErrorCode = "REQUEST_BODY_INVALID"
+		if errors.Is(decodingErr, errBodyTooLarge) {
+			writeProxyError(w, http.StatusRequestEntityTooLarge, "REQUEST_BODY_INVALID", "decompressed body exceeds configured limit")
+		} else {
+			writeProxyError(w, http.StatusBadRequest, "REQUEST_BODY_INVALID", "invalid gzip request body")
+		}
+		return
+	}
+	if !passthrough && (len(body) == 0 || !isJSON(r.Header.Get("Content-Type")) || !json.Valid(body) || (contentEncoding != "" && contentEncoding != "identity" && contentEncoding != "gzip")) {
 		// A matched route with a representation we do not understand must remain
 		// available, but must never be reported as protected.
 		passthrough = true
@@ -197,11 +222,11 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		auditEntry.ProtectionMode = protectionMode
 	}
 
-	redactedBody := body
+	forwardBody := body
 	scopeID := ""
 	if !passthrough && len(body) > 0 && isJSON(r.Header.Get("Content-Type")) {
 		redactStarted := time.Now()
-		redactedBody, scopeID, auditEntry.Fields, err = g.redactJSON(r.Context(), body, operation, g.rules.RedactAIAnswers(), scopeID)
+		forwardBody, scopeID, auditEntry.Fields, err = g.redactJSON(r.Context(), body, operation, g.rules.RedactAIAnswers(), scopeID)
 		redactionDuration += time.Since(redactStarted).Milliseconds()
 		if err != nil {
 			auditEntry.ErrorCode = "REDACTION_FAILED"
@@ -211,6 +236,14 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	}
 	if passthrough {
 		redactionDuration = 0
+		forwardBody = wireBody
+	} else if contentEncoding == "gzip" {
+		forwardBody, err = encodeGzipBody(forwardBody)
+		if err != nil {
+			auditEntry.ErrorCode = "REQUEST_RECOMPRESSION_FAILED"
+			writeProxyError(w, http.StatusInternalServerError, "REQUEST_RECOMPRESSION_FAILED", err.Error())
+			return
+		}
 	}
 	if scopeID != "" {
 		defer g.pii.Store().Delete(context.Background(), scopeID)
@@ -221,7 +254,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		writeProxyError(w, http.StatusInternalServerError, "UPSTREAM_URL_INVALID", err.Error())
 		return
 	}
-	request, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), bytes.NewReader(redactedBody))
+	request, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), bytes.NewReader(forwardBody))
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "UPSTREAM_REQUEST_FAILED", err.Error())
 		return
@@ -386,13 +419,24 @@ func (g *Gateway) resolveGenericRoute(r *http.Request) (upstream.Upstream, bool)
 	if !strings.EqualFold(r.Method, http.MethodPost) || !isJSON(r.Header.Get("Content-Type")) {
 		return upstream.Upstream{}, false
 	}
-	body, err := readBody(r.Body, maxBodyBytes)
+	wireBody, err := readBody(r.Body, maxBodyBytes)
 	if err != nil {
 		return upstream.Upstream{}, false
 	}
 	// The normal request path still owns the body; restore it after the route
 	// probe so redaction and forwarding see the original bytes.
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.Body = io.NopCloser(bytes.NewReader(wireBody))
+	body := wireBody
+	switch strings.TrimSpace(strings.ToLower(r.Header.Get("Content-Encoding"))) {
+	case "", "identity":
+	case "gzip":
+		body, err = decodeGzipBody(wireBody, maxBodyBytes)
+		if err != nil {
+			return upstream.Upstream{}, false
+		}
+	default:
+		return upstream.Upstream{}, false
+	}
 	if _, err := profile.GenericMatch(r.Method, body); err != nil {
 		return upstream.Upstream{}, false
 	}
@@ -875,6 +919,34 @@ func readBody(reader io.Reader, limit int64) ([]byte, error) {
 		return body, errBodyTooLarge
 	}
 	return body, nil
+}
+
+func decodeGzipBody(body []byte, limit int64) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	decompressed, readErr := readBody(reader, limit)
+	closeErr := reader.Close()
+	if readErr != nil {
+		return decompressed, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	return decompressed, nil
+}
+
+func encodeGzipBody(body []byte) ([]byte, error) {
+	var encoded bytes.Buffer
+	writer := gzip.NewWriter(&encoded)
+	if _, err := writer.Write(body); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return encoded.Bytes(), nil
 }
 
 func isJSON(contentType string) bool {

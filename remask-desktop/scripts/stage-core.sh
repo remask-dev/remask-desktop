@@ -31,6 +31,13 @@ case "$(uname -s)" in
     ;;
 esac
 
+# Local desktop builds normally reuse the runtime staged by the previous
+# successful build. CI and cross-compilation can still provide an explicit
+# source through REMASK_ONNXRUNTIME_LIBRARY.
+if [[ -z "$runtime_library" && -f "$runtime_target_dir/$runtime_filename" ]]; then
+  runtime_library="$runtime_target_dir/$runtime_filename"
+fi
+
 if [[ -z "$target_triple" ]]; then
   echo "unable to determine Rust target triple; set TARGET_TRIPLE" >&2
   exit 1
@@ -87,51 +94,55 @@ mv "$models_stage_dir" "$tauri_dir/resources/models"
 runtime_source_dir="$(cd "$(dirname "$runtime_library")" && pwd)"
 runtime_source_path="$runtime_source_dir/$(basename "$runtime_library")"
 runtime_target_path="$(cd "$runtime_target_dir" && pwd)/$runtime_filename"
-# Remove provider files from an earlier staging run before copying the new
-# runtime set; otherwise switching from a GPU runtime to a CPU runtime could
-# leave stale providers in the application bundle.
-shopt -s nullglob
-stale_provider_libraries=(
-  "$runtime_target_dir"/libonnxruntime_providers_*
-  "$runtime_target_dir"/onnxruntime_providers_*.dll
-  "$runtime_target_dir"/DirectML.dll
-)
-shopt -u nullglob
-for stale_provider_library in "${stale_provider_libraries[@]}"; do
-  rm -f "$stale_provider_library"
-done
+# When the staged runtime is the source, leave its provider companions in
+# place. An explicit external runtime remains authoritative and replaces any
+# provider files left by an earlier build.
 if [[ "$runtime_source_path" != "$runtime_target_path" ]]; then
+  # Remove provider files from an earlier staging run before copying the new
+  # runtime set; otherwise switching from a GPU runtime to a CPU runtime could
+  # leave stale providers in the application bundle.
+  shopt -s nullglob
+  stale_provider_libraries=(
+    "$runtime_target_dir"/libonnxruntime_providers_*
+    "$runtime_target_dir"/onnxruntime_providers_*.dll
+    "$runtime_target_dir"/DirectML.dll
+  )
+  shopt -u nullglob
+  for stale_provider_library in "${stale_provider_libraries[@]}"; do
+    rm -f "$stale_provider_library"
+  done
   rm -f "$runtime_target_path"
   cp "$runtime_source_path" "$runtime_target_path"
-fi
-# GPU execution providers may be shipped as companion libraries beside the
-# main ONNX Runtime library. Stage them with the sidecar so providers can be
-# loaded at runtime (CUDA/ROCm/OpenVINO on Linux, CUDA/DirectML on Windows).
-provider_libraries=()
-case "$runtime_filename" in
-  libonnxruntime.dylib)
-    shopt -s nullglob
-    provider_libraries=("$runtime_source_dir"/libonnxruntime_providers_*.dylib)
-    shopt -u nullglob
-    ;;
-  libonnxruntime.so)
-    shopt -s nullglob
-    provider_libraries=("$runtime_source_dir"/libonnxruntime_providers_*.so*)
-    shopt -u nullglob
-    ;;
-  onnxruntime.dll)
-    shopt -s nullglob
-    provider_libraries=("$runtime_source_dir"/onnxruntime_providers_*.dll "$runtime_source_dir"/DirectML.dll)
-    shopt -u nullglob
-    ;;
-  *)
-    provider_libraries=()
-    ;;
-esac
-if [[ -n "${provider_libraries[*]-}" ]]; then
-  for provider_library in "${provider_libraries[@]}"; do
-    cp -L "$provider_library" "$runtime_target_dir/$(basename "$provider_library")"
-  done
+
+  # GPU execution providers may be shipped as companion libraries beside the
+  # main ONNX Runtime library. Stage them with the sidecar so providers can be
+  # loaded at runtime (CUDA/ROCm/OpenVINO on Linux, CUDA/DirectML on Windows).
+  provider_libraries=()
+  case "$runtime_filename" in
+    libonnxruntime.dylib)
+      shopt -s nullglob
+      provider_libraries=("$runtime_source_dir"/libonnxruntime_providers_*.dylib)
+      shopt -u nullglob
+      ;;
+    libonnxruntime.so)
+      shopt -s nullglob
+      provider_libraries=("$runtime_source_dir"/libonnxruntime_providers_*.so*)
+      shopt -u nullglob
+      ;;
+    onnxruntime.dll)
+      shopt -s nullglob
+      provider_libraries=("$runtime_source_dir"/onnxruntime_providers_*.dll "$runtime_source_dir"/DirectML.dll)
+      shopt -u nullglob
+      ;;
+    *)
+      provider_libraries=()
+      ;;
+  esac
+  if [[ -n "${provider_libraries[*]-}" ]]; then
+    for provider_library in "${provider_libraries[@]}"; do
+      cp -L "$provider_library" "$runtime_target_dir/$(basename "$provider_library")"
+    done
+  fi
 fi
 # Downloaded runtimes may arrive read-only; tauri-build copies resources with
 # fs::copy, which cannot overwrite a read-only destination on a rebuild.

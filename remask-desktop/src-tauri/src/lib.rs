@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -130,8 +132,31 @@ fn append_client_log(app: AppHandle, entry: String) -> Result<(), String> {
         .append(true)
         .open(log_path)
         .map_err(|error| error.to_string())?;
-    use std::io::Write;
     writeln!(file, "{payload}").map_err(|error| error.to_string())
+}
+
+fn open_core_log(remask_dir: &Path) -> Result<File, String> {
+    let log_dir = remask_dir.join("logs");
+    std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("core.log"))
+        .map_err(|error| error.to_string())
+}
+
+fn persist_core_log_line(log: &mut Option<File>, line: &[u8]) {
+    let result = log.as_mut().map(|file| {
+        file.write_all(line)?;
+        if !line.ends_with(b"\n") {
+            file.write_all(b"\n")?;
+        }
+        file.flush()
+    });
+    if let Some(Err(error)) = result {
+        eprintln!("failed to write core.log: {error}");
+        *log = None;
+    }
 }
 
 #[tauri::command]
@@ -234,6 +259,13 @@ fn spawn_core(
         .sidecar("remask-core")
         .map_err(|error| error.to_string())?
         .args(args);
+    let mut core_log = match open_core_log(&remask_dir) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            eprintln!("failed to open core.log: {error}");
+            None
+        }
+    };
     let (mut events, child) = command.spawn().map_err(|error| error.to_string())?;
     let pid = child.pid();
     #[cfg(target_os = "windows")]
@@ -257,9 +289,11 @@ fn spawn_core(
             match event {
                 CommandEvent::Stdout(line) => {
                     eprintln!("remask-core: {}", String::from_utf8_lossy(&line));
+                    persist_core_log_line(&mut core_log, &line);
                 }
                 CommandEvent::Stderr(line) => {
                     eprintln!("remask-core: {}", String::from_utf8_lossy(&line));
+                    persist_core_log_line(&mut core_log, &line);
                 }
                 CommandEvent::Error(error) => {
                     eprintln!("remask-core event error: {error}");
@@ -382,6 +416,15 @@ fn launch_ai_client(
     system_integration::launch_client(&app, &client, &forward_proxy_address)
 }
 
+#[tauri::command]
+fn launch_app_with_proxy(
+    app: AppHandle,
+    app_path: String,
+    forward_proxy_address: String,
+) -> Result<(), String> {
+    system_integration::launch_app(&app, &app_path, &forward_proxy_address)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -390,6 +433,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
         ))
+        .plugin(tauri_plugin_dialog::init())
         .manage(CoreProcess(Mutex::new(None)))
         .setup(|app| {
             let launched_at_login = std::env::args().any(|arg| arg == "--autostart");
@@ -488,7 +532,8 @@ pub fn run() {
             restart_core,
             system_certificate_status,
             install_system_certificate,
-            launch_ai_client
+            launch_ai_client,
+            launch_app_with_proxy
         ])
         .build(tauri::generate_context!())
         .expect("error while building remask-desktop")

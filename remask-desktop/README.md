@@ -31,6 +31,33 @@ The same view provides quick-launch buttons for Claude Code and Codex. Before la
 
 ## Stage the desktop sidecar
 
+For local development, use the one-command desktop workflows. Both commands
+rebuild and stage the Go sidecar before Tauri starts, so source changes cannot
+silently run against an older Core binary:
+
+```bash
+# Rebuild Core and start the Tauri development app
+npm run desktop:dev
+
+# Rebuild Core and create the production desktop bundle
+npm run desktop:build
+```
+
+After the first successful staging, these commands reuse the ONNX Runtime
+already under `src-tauri/resources/onnxruntime`. Set
+`REMASK_ONNXRUNTIME_LIBRARY` only when staging a runtime for the first time or
+replacing it. `desktop:dev` keeps Vite frontend hot reload enabled but disables
+Tauri's Rust watcher, which would otherwise interpret the freshly staged
+sidecar as another source change and restart the app. Re-run the same command
+after changing Go or Rust code.
+
+Core stdout and stderr are written to `~/.remask/logs/core.log` as well as the
+development terminal and can be followed with:
+
+```bash
+tail -f ~/.remask/logs/core.log
+```
+
 Before building a production Tauri bundle, stage the ONNX-enabled core, model package, and platform runtime:
 
 ```bash
