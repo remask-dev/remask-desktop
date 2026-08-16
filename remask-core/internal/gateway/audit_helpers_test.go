@@ -57,3 +57,9 @@ func TestExtractRequestModel(t *testing.T) {
 		}
 	}
 }
+
+func TestTargetHostname(t *testing.T) {
+	if got := targetHostname("https://API.Example.com:8443/v1"); got != "api.example.com" {
+		t.Fatalf("target hostname = %q", got)
+	}
+}

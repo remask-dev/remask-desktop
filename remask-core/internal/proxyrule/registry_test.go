@@ -61,3 +61,63 @@ func TestDisabledRuleDoesNotMatch(t *testing.T) {
 		t.Fatal("disabled rule unexpectedly matched")
 	}
 }
+
+func TestRegistryMatchesHostWildcards(t *testing.T) {
+	registry, err := NewRegistry("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []Rule{
+		{ID: "all", Hosts: []string{"*"}, Port: 443, ProfileID: "generic", Enabled: true},
+		{ID: "example", Hosts: []string{"*.example.com"}, Port: 443, ProfileID: "openai", Enabled: true},
+		{ID: "nested", Hosts: []string{"*.api.example.com"}, Port: 443, ProfileID: "openai", Enabled: true},
+		{ID: "exact", Hosts: []string{"special.api.example.com"}, Port: 443, ProfileID: "anthropic", Enabled: true},
+	} {
+		if err := registry.Put(item); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		authority string
+		wantID    string
+	}{
+		{authority: "unrelated.test:443", wantID: "all"},
+		{authority: "example.com:443", wantID: "all"},
+		{authority: "chat.example.com:443", wantID: "example"},
+		{authority: "v1.api.example.com:443", wantID: "nested"},
+		{authority: "special.api.example.com:443", wantID: "exact"},
+	}
+	for _, test := range tests {
+		matched, ok := registry.MatchAuthority(test.authority)
+		if !ok || matched.ID != test.wantID {
+			t.Errorf("MatchAuthority(%q) = %#v, %t; want rule %q", test.authority, matched, ok, test.wantID)
+		}
+	}
+}
+
+func TestRegistryWildcardStillHonorsPort(t *testing.T) {
+	registry, err := NewRegistry("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Put(Rule{ID: "https", Hosts: []string{"*"}, Port: 443, ProfileID: "openai", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.MatchAuthority("api.example.com:8443"); ok {
+		t.Fatal("wildcard unexpectedly matched a different port")
+	}
+}
+
+func TestRegistryRejectsUnsupportedHostWildcards(t *testing.T) {
+	registry, err := NewRegistry("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"api.*.example.com", "example.*", "**.example.com"} {
+		item := Rule{ID: host, Hosts: []string{host}, Port: 443, ProfileID: "openai", Enabled: true}
+		if err := registry.Put(item); err == nil {
+			t.Errorf("expected wildcard %q to be rejected", host)
+		}
+	}
+}

@@ -16,6 +16,7 @@ type Operation struct {
 	Paths                []string `json:"paths"`
 	Passthrough          bool     `json:"passthrough,omitempty"`
 	RequestTextFields    []string `json:"request_text_fields"`
+	SystemTextFields     []string `json:"system_text_fields,omitempty"`
 	AssistantRoleFields  []string `json:"assistant_role_fields,omitempty"`
 	AssistantRoles       []string `json:"assistant_roles,omitempty"`
 	ResponseTextFields   []string `json:"response_text_fields"`
@@ -111,6 +112,10 @@ func GenericOperation() Operation {
 			"/system_instruction/parts/*/text", "/systemInstruction/parts/*/text",
 			"/contents/*/parts/*/text",
 		},
+		SystemTextFields: []string{
+			"/instructions", "/system", "/system/*/text",
+			"/system_instruction/parts/*/text", "/systemInstruction/parts/*/text",
+		},
 		AssistantRoleFields: []string{"/messages/*/role", "/input/*/role", "/contents/*/role"},
 		AssistantRoles:      []string{"assistant", "model"},
 		ResponseTextFields: []string{
@@ -153,7 +158,7 @@ func Builtins() []Profile {
 			Operations: []Operation{
 				{ID: "list-models", Methods: []string{"GET"}, Paths: []string{"/v1/models"}, Passthrough: true},
 				{ID: "create-chat-completion", Methods: []string{"POST"}, Paths: []string{"/v1/chat/completions"}, RequestTextFields: []string{"/messages/*/content", "/messages/*/content/*/text"}, AssistantRoleFields: []string{"/messages/*/role"}, AssistantRoles: []string{"assistant"}, ResponseTextFields: []string{"/choices/*/message/content"}, StreamTextFields: []string{"/choices/*/delta/content"}, StreamChannelFields: []string{"/choices/*/index"}, StreamTerminalData: []string{"[DONE]"}},
-				{ID: "create-response", Methods: []string{"POST"}, Paths: []string{"/v1/responses"}, RequestTextFields: []string{"/instructions", "/input", "/input/*/content", "/input/*/content/*/text", "/input/*/content/*/content", "/input/*/arguments", "/input/*/output"}, AssistantRoleFields: []string{"/input/*/role"}, AssistantRoles: []string{"assistant"}, ResponseTextFields: []string{"/output/*/content/*/text", "/output/*/arguments"}, StreamTextFields: []string{"/delta"}, StreamChannelFields: []string{"/output_index", "/content_index", "/item_id"}},
+				{ID: "create-response", Methods: []string{"POST"}, Paths: []string{"/v1/responses"}, RequestTextFields: []string{"/instructions", "/input", "/input/*/content", "/input/*/content/*/text", "/input/*/content/*/content", "/input/*/arguments", "/input/*/output"}, SystemTextFields: []string{"/instructions"}, AssistantRoleFields: []string{"/input/*/role"}, AssistantRoles: []string{"assistant"}, ResponseTextFields: []string{"/output/*/content/*/text", "/output/*/arguments"}, StreamTextFields: []string{"/delta"}, StreamChannelFields: []string{"/output_index", "/content_index", "/item_id"}},
 			},
 		},
 		{
@@ -163,6 +168,7 @@ func Builtins() []Profile {
 				{
 					ID: "create-message", Methods: []string{"POST"}, Paths: []string{"/v1/messages"},
 					RequestTextFields:    []string{"/system", "/system/*/text", "/messages/*/content", "/messages/*/content/*/text", "/messages/*/content/*/content", "/messages/*/content/*/content/*/text"},
+					SystemTextFields:     []string{"/system", "/system/*/text"},
 					AssistantRoleFields:  []string{"/messages/*/role"},
 					AssistantRoles:       []string{"assistant"},
 					ResponseTextFields:   []string{"/content/*/text"},
@@ -179,6 +185,7 @@ func Builtins() []Profile {
 					ID: "create-codex-response", Methods: []string{"POST"},
 					Paths:               []string{"/backend-api/codex/responses", "/backend-api/codex/responses/*", "/backend-api/api/codex", "/backend-api/api/codex/responses", "/backend-api/api/codex/responses/*"},
 					RequestTextFields:   []string{"/instructions", "/input", "/input/*/content", "/input/*/content/*/text", "/input/*/content/*/content", "/input/*/arguments", "/input/*/output"},
+					SystemTextFields:    []string{"/instructions"},
 					AssistantRoleFields: []string{"/input/*/role"},
 					AssistantRoles:      []string{"assistant"},
 					ResponseTextFields:  []string{"/output/*/content/*/text", "/output/*/arguments"},
@@ -194,6 +201,7 @@ func Builtins() []Profile {
 				{
 					ID: "generate-content", Methods: []string{"POST"}, Paths: []string{"/v1beta/models/*:generateContent", "/v1beta/models/*:streamGenerateContent"},
 					RequestTextFields:   []string{"/system_instruction/parts/*/text", "/contents/*/parts/*/text"},
+					SystemTextFields:    []string{"/system_instruction/parts/*/text"},
 					AssistantRoleFields: []string{"/contents/*/role"},
 					AssistantRoles:      []string{"model"},
 					ResponseTextFields:  []string{"/candidates/*/content/parts/*/text"},

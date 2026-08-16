@@ -15,13 +15,14 @@ import (
 	"time"
 
 	"github.com/remask/remask-core/internal/app"
+	"github.com/remask/remask-core/internal/forwardproxy"
 	"github.com/remask/remask-core/internal/model"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:17680", "HTTP listen address")
 	proxyAddr := flag.String("proxy-addr", "127.0.0.1:17681", "AI proxy listen address")
-	forwardProxyAddr := flag.String("forward-proxy-addr", "127.0.0.1:17682", "explicit HTTP/HTTPS proxy listen address")
+	forwardProxyAddr := flag.String("forward-proxy-addr", "127.0.0.1:17682", "HTTP/HTTPS and SOCKS5 proxy gateway listen address")
 	modelsDir := flag.String("models-dir", "models", "managed model directory")
 	builtinModelsDir := flag.String("builtin-models-dir", "", "read-only built-in model directory")
 	activeModel := flag.String("active-model", os.Getenv("REMASK_ACTIVE_MODEL"), "model ID to load before serving requests")
@@ -33,7 +34,7 @@ func main() {
 
 	logger := log.New(os.Stderr, "remask-core ", log.LstdFlags|log.LUTC)
 	if *addr == *proxyAddr || *addr == *forwardProxyAddr || *proxyAddr == *forwardProxyAddr {
-		logger.Printf("management, gateway, and forward proxy addresses must be different")
+		logger.Printf("management, API gateway, and proxy gateway addresses must be different")
 		os.Exit(1)
 	}
 	if *dataDir == "" {
@@ -71,9 +72,9 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
-	forwardProxyServer := &http.Server{
+	forwardProxyServer := &forwardproxy.Server{
 		Addr:              *forwardProxyAddr,
-		Handler:           application.ForwardProxyHandler(),
+		Handler:           application.ForwardProxy(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
@@ -92,7 +93,7 @@ func main() {
 			logger.Printf("shutdown proxy server: %v", err)
 		}
 		if err := forwardProxyServer.Shutdown(shutdownCtx); err != nil {
-			logger.Printf("shutdown forward proxy server: %v", err)
+			logger.Printf("shutdown proxy gateway server: %v", err)
 		}
 	}()
 

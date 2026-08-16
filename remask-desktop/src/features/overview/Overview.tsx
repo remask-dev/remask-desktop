@@ -1,18 +1,14 @@
 import { useState } from "react";
-import { Braces, Check, Copy, Cpu, ShieldCheck } from "lucide-react";
-import { connection } from "../../shared/api/client";
+import { Braces, Check, Cpu, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { AuditStatsRange, DailyStat } from "../../shared/api/types";
 import { useI18n } from "../../shared/i18n/I18n";
 import { Select } from "../../shared/ui/Select";
-import { useApp } from "../../app/AppContext";
 import { useOverviewData } from "../../app/useCore";
 import { PageState } from "../../shared/ui/PageState";
 
 export function Overview() {
   const { t, dateLocale } = useI18n();
-  const { notify } = useApp();
-  const proxy = connection.proxy();
-  const forwardProxy = connection.forwardProxy();
   const [range, setRange] = useState<AuditStatsRange>("today");
   const statsQuery = useOverviewData(range);
   if (statsQuery.isPending || !statsQuery.stats || !statsQuery.policy || statsQuery.activeModel === undefined) return <PageState pending={statsQuery.isPending} error={statsQuery.error} onRetry={() => void statsQuery.refetch()}/>;
@@ -29,24 +25,15 @@ export function Overview() {
     { value: "30d", label: t("last30Days") },
   ];
 
-  async function copy(value: string) {
-    await navigator.clipboard.writeText(value);
-    notify(t("copied"));
-  }
-
   return <div className="overview-layout">
     <section className="trust-strip">
       <div className="trust-strip__topline">
         <div className="trust-strip__title"><ShieldCheck size={16}/><span>{t("piiProtectionPath")}</span></div>
-        <div className="overview-gateway-addresses">
-          <button className="overview-gateway-address" aria-label={`${t("copy")} ${t("apiGateway")}: ${proxy}`} title={`${t("copy")} ${proxy}`} onClick={() => copy(proxy)}><span>{t("apiGateway")}</span><code>{proxy}</code><Copy size={12}/></button>
-          <button className="overview-gateway-address" aria-label={`${t("copy")} ${t("httpProxyGateway")}: ${forwardProxy}`} title={`${t("copy")} ${forwardProxy}`} onClick={() => copy(forwardProxy)}><span>{t("httpProxyGateway")}</span><code>{forwardProxy}</code><Copy size={12}/></button>
-        </div>
       </div>
       <div className="protection-capabilities">
-        <div className="protection-node"><span className="protection-node__icon"><Cpu size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("localModel")}</small></span><strong>{statsQuery.activeModel?.name || t("unconfigured")}</strong></span><CapabilityState active={Boolean(statsQuery.activeModel)}/></div>
-        <div className="protection-node"><span className="protection-node__icon"><Braces size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("rulesEngine")}</small></span><strong>{ruleCount}</strong></span><CapabilityState/></div>
-        <div className="protection-node protection-node--gateway"><span className="protection-node__icon"><ShieldCheck size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("gateway")}</small></span><strong>{gatewayProviderCount}</strong></span><CapabilityState/></div>
+        <Link className="protection-node" to="/models"><span className="protection-node__icon"><Cpu size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("localModel")}</small></span><strong>{statsQuery.activeModel?.name || t("unconfigured")}</strong></span><CapabilityState active={Boolean(statsQuery.activeModel)}/></Link>
+        <Link className="protection-node" to="/rules"><span className="protection-node__icon"><Braces size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("rulesEngine")}</small></span><strong>{ruleCount}</strong></span><CapabilityState/></Link>
+        <Link className="protection-node protection-node--gateway" to="/gateway"><span className="protection-node__icon"><ShieldCheck size={14}/></span><span className="protection-node__body"><span className="protection-node__label"><small>{t("gateway")}</small></span><strong>{gatewayProviderCount}</strong></span><CapabilityState/></Link>
       </div>
     </section>
     <div className="overview-workspace overview-workspace--compact">
@@ -86,6 +73,6 @@ function ChartColumn({ item, index, total, granularity, max, dateLocale, entitie
   </div>;
 }
 
-function Metric({ label, value, unit, detail, accent }: { label: string; value: string | number; unit?: string; detail?: string; accent?: boolean }) { return <article className={`metric ${accent ? "metric--accent" : ""}`}><span>{label}</span><strong>{value}{unit && <em>{unit}</em>}</strong><small>{detail || " "}</small></article>; }
+function Metric({ label, value, unit, detail, accent }: { label: string; value: string | number; unit?: string; detail?: string; accent?: boolean }) { const description = `${value}${unit ? ` ${unit}` : ""}${detail ? ` · ${detail}` : ""}`; return <article className={`metric ${accent ? "metric--accent" : ""}`}><span>{label}</span><strong title={description}>{value}{unit && <em>{unit}</em>}</strong><small>{detail || " "}</small></article>; }
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) { return <div className="section-title"><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>; }
 function CapabilityState({ active = true }: { active?: boolean }) { return <span className={`capability-state ${active ? "capability-state--active" : "capability-state--warning"}`} aria-hidden="true">{active ? <Check size={9}/> : <span>!</span>}</span>; }

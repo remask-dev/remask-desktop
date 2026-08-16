@@ -26,7 +26,7 @@ Remask 在 AI 客户端和上游 AI API 之间提供本地 PII 保护：请求�
 首版支持：
 
 - HTTP/HTTPS 反向代理。
-- 标准 HTTP 正向代理和 HTTPS `CONNECT`；仅对独立配置的“保护目标”使用本地 CA 解密。
+- 同端口的 HTTP 正向代理、HTTPS `CONNECT` 与 SOCKS5 `CONNECT`；仅对独立配置的“保护目标”使用本地 CA 解密。
 - `application/json` 请求和非流式响应。
 - `text/event-stream` SSE 响应。
 - OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Gemini GenerateContent 等内置 Profile。
@@ -75,7 +75,7 @@ AI Client / remask-desktop
 - PII Pipeline 只接收文本，不感知 HTTP、SSE 或 AI 厂商。
 - Profile 只描述路由、文本字段和流事件字段，不实现实体识别。
 - Proxy 只负责协议保持、超时、取消、Header 和流控。
-- HTTP 正向代理的真实目标始终来自请求 URL 或 `CONNECT` authority；保护目标规则只负责域名匹配和选择 Profile，不得通过 Upstream 改写目的地址。
+- 代理网关的真实目标始终来自 HTTP 请求 URL、HTTP `CONNECT` authority 或 SOCKS5 目标地址；保护目标规则只负责域名匹配和选择 Profile，不得通过 Upstream 改写目的地址。
 - Tauri 不链接 Go 源码，只调用 `remask-core` 的版本化 HTTP API。
 - 代理入口在单一端口下使用 `/proxy/{upstream}` 命名空间；转发前剥离该前缀，其余 path、query、method、Header、JSON 和 SSE 语义保持不变。
 
@@ -1059,7 +1059,7 @@ type ModelManager interface {
 5. 应用退出时调用 `/control/v1/shutdown`。
 6. 超时未退出时由 Tauri 终止其启动的确切 PID。
 
-当前桌面 sidecar 分别监听管理 API、反向网关和正向代理三个本机回环端口。端口必须互不冲突，桌面端基于实际端口生成 Upstream `base_url` 和正向代理地址。控制面和代理数据面使用不同 Token。
+当前桌面 sidecar 分别监听管理 API、API 网关和代理网关三个本机回环端口。端口必须互不冲突；代理网关在同一端口识别 HTTP/HTTPS 与 SOCKS5，桌面端基于实际端口生成对应地址。控制面和代理数据面使用不同 Token。
 
 ### 16.2 版本协商
 

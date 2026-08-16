@@ -26,7 +26,7 @@ export const queryKeys = {
 
 export type CoreStatus = "starting" | "online" | "offline";
 
-const emptyPolicy = (): PolicySettings => ({ enabled: false, redact_ai_answers: false, entity_types: [], rules: [] });
+const emptyPolicy = (): PolicySettings => ({ enabled: false, redact_ai_answers: false, redact_system_messages: false, entity_types: [], rules: [] });
 const emptyRuntime = (): RuntimeStatus => ({ available: false, name: "unavailable" });
 const emptyStats = (): AuditStats => ({
   requests: 0, entities: 0, success_rate: 0, average_latency_ms: 0, streaming_requests: 0,
@@ -34,7 +34,7 @@ const emptyStats = (): AuditStats => ({
 });
 const emptySettings = (): AuditSettings => ({
   record_request_content: false, debug: false, retention_days: 30, max_inference_tokens: 512,
-  inference_provider: "cpu", entity_cache_enabled: true, entity_cache_ttl_seconds: 300,
+  inference_provider: "cpu", entity_cache_enabled: true, entity_cache_ttl_seconds: 900,
 });
 const emptyProxyCA = () => ({ ready: false, certificate_path: undefined, fingerprint_sha256: "" });
 
@@ -107,7 +107,15 @@ export function useOverviewData(range: AuditStatsRange) {
 
 export function useLogsData(query = "") {
   const online = useCoreOnline();
-  return useQuery({ queryKey: queryKeys.logs(query), queryFn: () => coreApi.logs(query), enabled: online, initialData: [], initialDataUpdatedAt: 0 });
+  return useQuery({
+    queryKey: queryKeys.logs(query),
+    queryFn: () => coreApi.logs(query),
+    enabled: online,
+    initialData: [],
+    initialDataUpdatedAt: 0,
+    refetchInterval: online ? 5_000 : false,
+    refetchIntervalInBackground: true,
+  });
 }
 
 export function useLogDetailData(id: string) {

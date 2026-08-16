@@ -39,6 +39,9 @@ func (r Rule) Validate() error {
 		if host == "" || net.ParseIP(host) == nil && strings.ContainsAny(host, " /:@") {
 			return errors.New("hosts must contain DNS names or IP addresses")
 		}
+		if strings.Contains(host, "*") && host != "*" && (!strings.HasPrefix(host, "*.") || strings.Count(host, "*") != 1 || len(host) <= 2) {
+			return errors.New("host wildcards must be * or start with *.")
+		}
 		if seen[host] {
 			return errors.New("hosts must be unique")
 		}
@@ -169,17 +172,50 @@ func (r *Registry) MatchAuthority(authority string) (Rule, bool) {
 	if host == "" {
 		return Rule{}, false
 	}
+	var best Rule
+	bestHostKind, bestHostLength, bestPortKind := 0, 0, 0
 	for _, item := range r.List() {
 		if !item.Enabled || item.Port != 0 && port != 0 && item.Port != port {
 			continue
 		}
 		for _, candidate := range item.Hosts {
-			if normalizeHost(candidate) == host {
-				return item, true
+			hostKind, hostLength, matched := matchHost(candidate, host)
+			if !matched {
+				continue
+			}
+			portKind := 0
+			if item.Port != 0 {
+				portKind = 1
+			}
+			if hostKind > bestHostKind ||
+				hostKind == bestHostKind && hostLength > bestHostLength ||
+				hostKind == bestHostKind && hostLength == bestHostLength && portKind > bestPortKind {
+				best = item
+				bestHostKind, bestHostLength, bestPortKind = hostKind, hostLength, portKind
 			}
 		}
 	}
-	return Rule{}, false
+	return best, bestHostKind != 0
+}
+
+// matchHost returns a match category and pattern length so callers can prefer
+// exact hosts over subdomain wildcards, and narrower wildcards over broader
+// ones. A subdomain wildcard does not match the apex domain itself.
+func matchHost(pattern, host string) (kind int, length int, matched bool) {
+	pattern = normalizeHost(pattern)
+	host = normalizeHost(host)
+	switch {
+	case pattern == host:
+		return 3, len(pattern), true
+	case pattern == "*":
+		return 1, 0, true
+	case strings.HasPrefix(pattern, "*."):
+		suffix := pattern[1:]
+		if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
+			return 2, len(suffix), true
+		}
+	}
+	return 0, 0, false
 }
 
 func (r *Registry) Delete(id string) error {

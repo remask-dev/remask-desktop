@@ -95,10 +95,35 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 func (r *Router) getPolicy(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, r.rules.Policy())
 }
+
+type policyRequest struct {
+	Enabled              *bool                   `json:"enabled"`
+	RedactAIAnswers      *bool                   `json:"redact_ai_answers"`
+	RedactSystemMessages *bool                   `json:"redact_system_messages"`
+	EntityTypes          *[]pii.EntityTypeConfig `json:"entity_types"`
+	Rules                *[]pii.RuleConfig       `json:"rules"`
+}
+
 func (r *Router) putPolicy(w http.ResponseWriter, request *http.Request) {
-	var policy pii.PolicySettings
-	if !decodeJSON(w, request, &policy) {
+	var input policyRequest
+	if !decodeJSON(w, request, &input) {
 		return
+	}
+	policy := r.rules.Policy()
+	if input.Enabled != nil {
+		policy.Enabled = *input.Enabled
+	}
+	if input.RedactAIAnswers != nil {
+		policy.RedactAIAnswers = *input.RedactAIAnswers
+	}
+	if input.RedactSystemMessages != nil {
+		policy.RedactSystemMessages = *input.RedactSystemMessages
+	}
+	if input.EntityTypes != nil {
+		policy.EntityTypes = *input.EntityTypes
+	}
+	if input.Rules != nil {
+		policy.Rules = *input.Rules
 	}
 	if err := r.rules.Configure(policy); err != nil {
 		writeError(w, http.StatusBadRequest, "POLICY_INVALID", err.Error())
@@ -135,7 +160,7 @@ func (r *Router) proxyCAStatus(w http.ResponseWriter, _ *http.Request) {
 func (r *Router) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": "remask-core", "version": "0.1.0-dev", "api_version": "v1",
-		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.selective-mitm", "proxy.rules.persisted", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
+		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.socks5", "proxy.selective-mitm", "proxy.rules.persisted", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
 		"model_runtime": r.models.RuntimeStatus(),
 	})
 }

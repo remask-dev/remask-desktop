@@ -11,13 +11,13 @@ go run ./cmd/remask-core \
   --forward-proxy-addr 127.0.0.1:17682
 ```
 
-管理、模型与脱敏 API 监听 `--addr`；AI HTTP JSON/SSE 反向代理监听 `--proxy-addr`；标准 HTTP/HTTPS 正向代理监听 `--forward-proxy-addr`。反向代理支持三种入口：`/proxy/{service-id}/...` 精确选择服务；当 service ID 不存在时，`/proxy/{configured-domain}/...` 按已配置 `base_url` 的域名匹配；直接请求 `/*` 时按 HTTP 方法与请求适配方案自动匹配服务。域名入口不会转发到未配置主机；存在多个匹配服务时使用 service ID 排序后的第一个服务。
+管理、模型与脱敏 API 监听 `--addr`；AI HTTP JSON/SSE 反向代理监听 `--proxy-addr`；HTTP/HTTPS 与 SOCKS5 代理网关共用 `--forward-proxy-addr`。反向代理支持三种入口：`/proxy/{service-id}/...` 精确选择服务；当 service ID 不存在时，`/proxy/{configured-domain}/...` 按已配置 `base_url` 的域名匹配；直接请求 `/*` 时按 HTTP 方法与请求适配方案自动匹配服务。域名入口不会转发到未配置主机；存在多个匹配服务时使用 service ID 排序后的第一个服务。
 
 当 Upstream 已配置，但请求方法或 Path 没有命中所选请求适配方案时，网关会检查 POST JSON 请求体；若存在 `model`、`messages`、`input` 或 `contents` 等模型请求特征，则使用合并 OpenAI、Anthropic 与 Gemini 字段的通用策略执行脱敏和响应还原。其他未知请求仍透明转发，并在审计日志中标记为 `protection_mode: passthrough`。直接入口无法按 Path 自动选路时，同类模型请求会兜底选择 service ID 排序后的第一个已配置 Upstream；未配置的 `/proxy/{service-id}/...` 仍返回 `404 UPSTREAM_NOT_FOUND`。
 
-## HTTP/HTTPS 正向代理
+## 代理网关
 
-正向代理可以直接用于支持 `HTTP_PROXY`/`HTTPS_PROXY` 的现有程序。Remask 只解密已配置 Upstream 的 HTTPS 域名；未配置域名保持原始 TLS 字节隧道。已配置域名中未命中 Profile 的 Path、WebSocket、文件上传和其他未支持格式仍会透明转发，不会因无法识别而阻断。
+代理网关可以直接用于支持 `HTTP_PROXY`/`HTTPS_PROXY` 或 SOCKS5 的现有程序，两种协议共用同一端口。建议 SOCKS 客户端使用 `socks5h://`，让域名在代理端解析并正确命中保护目标。Remask 只解密已配置保护目标的 HTTPS 域名；未配置域名保持原始 TLS 字节隧道。已配置域名中未命中 Profile 的 Path、WebSocket、文件上传和其他未支持格式仍会透明转发，不会因无法识别而阻断。
 
 首次启动会在数据目录生成本地 CA：
 
@@ -32,6 +32,7 @@ Claude Code 示例：
 
 ```bash
 HTTPS_PROXY=http://127.0.0.1:17682 \
+ALL_PROXY=socks5h://127.0.0.1:17682 \
 NODE_EXTRA_CA_CERTS="$HOME/.remask/certificates/remask-ca.pem" \
 claude
 ```
@@ -40,6 +41,7 @@ Codex CLI 示例：
 
 ```bash
 HTTPS_PROXY=http://127.0.0.1:17682 \
+ALL_PROXY=socks5h://127.0.0.1:17682 \
 SSL_CERT_FILE="$HOME/.remask/certificates/remask-ca.pem" \
 codex
 ```
@@ -50,7 +52,7 @@ Upstream 配置、规则、审计设置和安全日志默认统一存放在用�
 
 设置中的 `debug` 字段默认关闭。开启后，调试请求会在桌面端日志详情页显示完整 URL、Header、请求体和返回体（包括已经还原给客户端的响应）；这些内容可能包含敏感信息，仅建议临时开启并在排障后关闭。该字段保留在设置 API 中，但桌面端不提供开关入口。
 
-实体识别默认使用 `patrickmn/go-cache` 进程内缓存，按输入文本的 SHA-256 摘要保存识别结果；缓存值只保留实体类型、位置和置信度等结构信息，不保存实体原文，命中时根据当前输入恢复。缓存命中会续期，过期项由后台清理。可通过 `PUT /api/v1/settings` 的 `audit.entity_cache_enabled` 和 `audit.entity_cache_ttl_seconds` 配置开关与过期时间（默认开启、300 秒，允许 1–86400 秒）。内存缓存不会写入磁盘。
+实体识别默认使用 `patrickmn/go-cache` 进程内缓存，按输入文本的 SHA-256 摘要保存识别结果；缓存值只保留实体类型、位置和置信度等结构信息，不保存实体原文，命中时根据当前输入恢复。缓存命中会续期，过期项由后台清理。可通过 `PUT /api/v1/settings` 的 `audit.entity_cache_enabled` 和 `audit.entity_cache_ttl_seconds` 配置开关与过期时间（默认开启、900 秒，允许 1–86400 秒）。内存缓存不会写入磁盘。
 
 缓存层通过统一接口隔离。多实例部署可直接切换到 Redis 6.2+：
 

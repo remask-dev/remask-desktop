@@ -15,6 +15,7 @@ export const connection = {
     return stored ? Number(stored) || fallback : fallback;
   },
   forwardProxy: () => `http://127.0.0.1:${connection.forwardProxyPort()}`,
+  socksProxy: () => `socks5h://127.0.0.1:${connection.forwardProxyPort()}`,
   saveGatewayPort(port: number) { localStorage.setItem("remask.gatewayPort", String(port)); },
   saveForwardProxyPort(port: number) { localStorage.setItem("remask.forwardProxyPort", String(port)); },
 };
@@ -146,7 +147,7 @@ function normalizePolicy(value: unknown): PolicySettings {
   const raw = isRecord(value) ? value : {};
   const entityTypes: EntityTypeConfig[] = records(raw.entity_types).map(item => ({ type: text(item.type), enabled: boolean(item.enabled, true) }));
   const rules: RuleConfig[] = records(raw.rules).map(item => ({ id: text(item.id), pattern: text(item.pattern), enabled: boolean(item.enabled, true) }));
-  return { enabled: boolean(raw.enabled, true), redact_ai_answers: boolean(raw.redact_ai_answers), entity_types: entityTypes, rules };
+  return { enabled: boolean(raw.enabled, true), redact_ai_answers: boolean(raw.redact_ai_answers), redact_system_messages: boolean(raw.redact_system_messages), entity_types: entityTypes, rules };
 }
 
 function normalizeAuditSettings(value: unknown): AuditSettings {
@@ -160,7 +161,7 @@ function normalizeAuditSettings(value: unknown): AuditSettings {
     max_inference_tokens: number(raw.max_inference_tokens, 512),
     inference_provider: provider === "auto" || provider === "gpu" ? provider : "cpu",
     entity_cache_enabled: boolean(raw.entity_cache_enabled, true),
-    entity_cache_ttl_seconds: number(raw.entity_cache_ttl_seconds, 300),
+    entity_cache_ttl_seconds: number(raw.entity_cache_ttl_seconds, 900),
   };
 }
 
@@ -204,9 +205,12 @@ function normalizeDebug(value: unknown): DebugExchange | undefined {
 }
 
 function normalizeLogSummary(log: Record<string, unknown>): AuditLogSummary {
+  const upstreamID = text(log.upstream_id);
   return {
-    id: text(log.id), timestamp: text(log.timestamp), upstream_id: text(log.upstream_id), profile_id: text(log.profile_id), operation_id: text(log.operation_id),
+    id: text(log.id), timestamp: text(log.timestamp), upstream_id: upstreamID, profile_id: text(log.profile_id), operation_id: text(log.operation_id),
     model: optionalText(log.model), protection_mode: log.protection_mode === "redacted" || log.protection_mode === "passthrough" || log.protection_mode === "disabled" ? log.protection_mode : undefined,
+    gateway_type: log.gateway_type === "proxy_gateway" ? "proxy_gateway" : "api_gateway",
+    target_host: optionalText(log.target_host),
     method: text(log.method), path: text(log.path), status_code: number(log.status_code), duration_ms: number(log.duration_ms), streaming: boolean(log.streaming),
     request_bytes: number(log.request_bytes), response_bytes: number(log.response_bytes), entity_count: number(log.entity_count), token_usage: normalizeTokenUsage(log.token_usage),
     error_code: optionalText(log.error_code),
@@ -248,6 +252,7 @@ export const coreApi = {
   redact: async (source: string) => { const raw = await request<unknown>("/api/v1/redact", { method: "POST", body: JSON.stringify({ text: source }) }); const value = isRecord(raw) ? raw : {}; return { text: text(value.text, source), scope_id: text(value.scope_id), replacement_count: number(value.replacement_count), entities: records(value.entities).map(normalizePIIEntity) } satisfies RedactResult; },
   saveSettings: async (audit: AuditSettings) => { const raw = await request<unknown>("/api/v1/settings", { method: "PUT", body: JSON.stringify({ audit, models: { hf_base_url: audit.hf_base_url || "" } }) }); return { audit: normalizeAuditSettings(isRecord(raw) ? raw.audit : undefined) }; },
   savePolicy: async (policy: PolicySettings) => normalizePolicy(await request<unknown>("/api/v1/policy", { method: "PUT", body: JSON.stringify(policy) })),
+  updatePolicy: async (patch: Partial<PolicySettings>) => normalizePolicy(await request<unknown>("/api/v1/policy", { method: "PUT", body: JSON.stringify(patch) })),
   putUpstream: (item: Upstream, editing: boolean) => request<Upstream>(editing ? `/api/v1/upstreams/${encodeURIComponent(item.id)}` : "/api/v1/upstreams", { method: editing ? "PUT" : "POST", body: JSON.stringify(item) }),
   deleteUpstream: (id: string) => request<void>(`/api/v1/upstreams/${encodeURIComponent(id)}`, { method: "DELETE" }),
   putProxyRule: (item: ProxyRule, editing: boolean) => request<ProxyRule>(editing ? `/api/v1/proxy-rules/${encodeURIComponent(item.id)}` : "/api/v1/proxy-rules", { method: editing ? "PUT" : "POST", body: JSON.stringify(item) }),

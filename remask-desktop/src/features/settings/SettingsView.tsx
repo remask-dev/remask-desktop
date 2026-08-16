@@ -53,7 +53,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   }
 
   const savePolicy = useMutation({
-    mutationFn: (next: PolicySettings) => coreApi.savePolicy(next),
+    mutationFn: (patch: Partial<PolicySettings>) => coreApi.updatePolicy(patch),
     onSuccess: saved => { setPolicy(saved); qc.setQueryData(queryKeys.policy, saved); },
     onError: error => { setPolicy(data.policy); notify(String(error)); },
   });
@@ -66,7 +66,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   const saveGatewayPorts = useMutation({
     mutationFn: async ({ apiPort, httpPort }: { apiPort: number; httpPort: number }) => {
       const corePort = Number(new URL(connection.core()).port) || 80;
-      if (![apiPort, httpPort].every(port => Number.isInteger(port) && port >= 1 && port <= 65535) || apiPort === httpPort || apiPort === corePort || httpPort === corePort) throw new Error(t("gatewayPortInvalid"));
+      if (![apiPort, httpPort].every(port => Number.isInteger(port) && port >= 1 && port <= 65535) || apiPort === httpPort || apiPort === corePort || httpPort === corePort) throw new Error(t("proxyGatewayPortInvalid"));
       const previousAPI = connection.proxyPort();
       const previousHTTP = connection.forwardProxyPort();
       if (apiPort === previousAPI && httpPort === previousHTTP) return { restarted: false, apiPort, httpPort };
@@ -96,7 +96,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   function updatePolicy(patch: Partial<PolicySettings>) {
     const next = { ...policy, ...patch };
     setPolicy(next);
-    savePolicy.mutate(next);
+    savePolicy.mutate(patch);
   }
   function updateAudit(patch: Partial<AuditSettings>) {
     const next = { ...audit, ...patch };
@@ -107,23 +107,24 @@ function SettingsContent({ data }: { data: SettingsData }) {
   function applyGatewayPorts() { if (!saveGatewayPorts.isPending) saveGatewayPorts.mutate({ apiPort: apiGatewayPort, httpPort: httpProxyPort }); }
 
   return <div className="settings-page"><div className="settings-grid">
-    <SettingsSection tone="interface" title={t("interfaceSettings")} subtitle={t("interfaceSettingsSub")}>
+    <SettingsSection tone="interface" title={t("applicationSettings")} subtitle={t("applicationSettingsSub")}>
       <SettingRow label={t("language")} description={locale === "zh" ? "简体中文" : "English"}><Select value={locale} onValueChange={value => setLocale(value as "zh" | "en")} options={[{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }]}/></SettingRow>
       {inTauri && <SettingRow last label={t("autostart")} description={t("autostartSub")}><Switch ariaLabel={t("autostart")} disabled={!autostartReady} checked={autostart} onCheckedChange={toggleAutostart}/></SettingRow>}
     </SettingsSection>
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
       <SettingRow label={t("apiGatewayPort")} description={t("apiGatewayPortSub")}><Input type="number" min={1} max={65535} value={apiGatewayPort} onChange={event => setAPIGatewayPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
-      <SettingRow last label={t("httpProxyPort")} description={t("httpProxyPortSub")}><Input type="number" min={1} max={65535} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
+      <SettingRow last label={t("proxyGatewayPort")} description={t("proxyGatewayPortSub")}><Input type="number" min={1} max={65535} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
     </SettingsSection>
-    <SettingsSection tone="models" title={t("modelDownloads")} subtitle={t("modelDownloadsSub")}>
+    <SettingsSection tone="models" title={t("modelSettings")} subtitle={t("modelSettingsSub")}>
       <SettingRow label={t("hfMirror")} description={t("hfMirrorSub")}><Input placeholder="https://huggingface.co" value={hfBaseURL} onChange={event => setHFBaseURL(event.target.value)} onBlur={applyHFBaseURL} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
       <SettingRow label={t("maxInferenceTokens")} description={t("maxInferenceTokensSub")}><Select value={String(audit.max_inference_tokens || 512)} onValueChange={value => updateAudit({ max_inference_tokens: Number(value) })} options={[512, 1024, 2048, 4096].map(value => ({ value: String(value), label: `${value} ${t("tokens")}` }))}/></SettingRow>
       <SettingRow last label={t("inferenceProvider")} description={t("inferenceProviderSub")}><Select value={audit.inference_provider || "cpu"} onValueChange={value => updateAudit({ inference_provider: value as AuditSettings["inference_provider"] })} options={[{ value: "auto", label: t("providerAuto") }, { value: "cpu", label: t("providerCPU") }, { value: "gpu", label: t("providerGPU") }]}/></SettingRow>
     </SettingsSection>
-    <SettingsSection tone="protection" title={t("protectionSettings")} subtitle={t("protectionSettingsSub")}>
+    <SettingsSection tone="protection" title={t("redactionSettings")} subtitle={t("redactionSettingsSub")}>
+      <SettingRow label={t("redactSystemMessages")} description={t("redactSystemMessagesSub")}><Switch ariaLabel={t("redactSystemMessages")} disabled={savePolicy.isPending} checked={policy.redact_system_messages} onCheckedChange={redact_system_messages => updatePolicy({ redact_system_messages })}/></SettingRow>
       <SettingRow label={t("redactAIAnswers")} description={t("redactAIAnswersSub")}><Switch ariaLabel={t("redactAIAnswers")} disabled={savePolicy.isPending} checked={policy.redact_ai_answers} onCheckedChange={redact_ai_answers => updatePolicy({ redact_ai_answers })}/></SettingRow>
       <SettingRow label={t("entityCache")} description={t("entityCacheSub")}><Switch ariaLabel={t("entityCache")} disabled={saveAudit.isPending} checked={audit.entity_cache_enabled !== false} onCheckedChange={entity_cache_enabled => updateAudit({ entity_cache_enabled })}/></SettingRow>
-      <SettingRow last label={t("entityCacheTTL")} description={t("entityCacheTTLSub")}><Select value={String(audit.entity_cache_ttl_seconds || 300)} onValueChange={value => updateAudit({ entity_cache_ttl_seconds: Number(value) })} options={[60, 300, 900, 3600].map(value => ({ value: String(value), label: `${value < 3600 ? value / 60 + " min" : "1 h"}` }))}/></SettingRow>
+      <SettingRow last label={t("entityCacheTTL")} description={t("entityCacheTTLSub")}><Select value={String(audit.entity_cache_ttl_seconds || 900)} onValueChange={value => updateAudit({ entity_cache_ttl_seconds: Number(value) })} options={[60, 300, 900, 3600].map(value => ({ value: String(value), label: `${value < 3600 ? value / 60 + " min" : "1 h"}` }))}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="logs" title={t("audit")} subtitle={t("auditSub")}>
       <SettingRow label={t("record")} description={t("recordSub")}><Switch ariaLabel={t("record")} disabled={saveAudit.isPending} checked={audit.record_request_content} onCheckedChange={record_request_content => updateAudit({ record_request_content })}/></SettingRow>

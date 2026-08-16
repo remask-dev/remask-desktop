@@ -17,6 +17,7 @@ func TestStorePersistsAndAggregatesMaskedAudit(t *testing.T) {
 	entry := Entry{
 		Timestamp: time.Now().UTC(), UpstreamID: "openai", ProfileID: "openai",
 		OperationID: "create-chat-completion", Model: "gpt-4.1-mini", Method: "POST", Path: "/v1/chat/completions",
+		TargetHost: "api.openai.com",
 		StatusCode: 200, DurationMS: 18, EntityCount: 1, TokenUsage: TokenUsage{Input: 12, Output: 8, Total: 20, Cached: 6},
 		Fields: []Field{{Path: "/messages/0/content", OriginalMasked: "联系 [PHONE_NUMBER]", Redacted: "联系 <PHONE_NUMBER:A7F2>", Entities: []Entity{{Type: "PHONE_NUMBER", Replacement: "<PHONE_NUMBER:A7F2>"}}}},
 	}
@@ -44,6 +45,12 @@ func TestStorePersistsAndAggregatesMaskedAudit(t *testing.T) {
 	}
 	if logs[0].Model != "gpt-4.1-mini" {
 		t.Fatalf("request model was not persisted: %#v", logs[0])
+	}
+	if logs[0].GatewayType != GatewayTypeAPI {
+		t.Fatalf("default gateway type was not persisted: %#v", logs[0])
+	}
+	if logs[0].TargetHost != "api.openai.com" {
+		t.Fatalf("target host was not persisted: %#v", logs[0])
 	}
 	if matched := loaded.List(Query{Limit: 10, Search: "gpt-4.1-mini"}); len(matched) != 1 {
 		t.Fatalf("request model was not searchable: %#v", matched)
@@ -93,8 +100,26 @@ func TestStoreUsesOneGenericExtraColumn(t *testing.T) {
 		}
 		columns[name] = true
 	}
-	if !columns["extra_json"] || columns["debug_request_json"] || columns["debug_response_json"] {
+	if !columns["extra_json"] || !columns["gateway_type"] || !columns["target_host"] || columns["debug_request_json"] || columns["debug_response_json"] {
 		t.Fatalf("unexpected audit extra columns: %#v", columns)
+	}
+}
+
+func TestStorePersistsProxyGatewayTypeInSummariesAndDetails(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(Entry{UpstreamID: "test", GatewayType: GatewayTypeProxy, TargetHost: "api.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	summaries := store.ListSummaries(Query{Limit: 1})
+	if len(summaries) != 1 || summaries[0].GatewayType != GatewayTypeProxy || summaries[0].TargetHost != "api.example.com" {
+		t.Fatalf("proxy gateway type missing from summary: %#v", summaries)
+	}
+	detail, ok := store.Get(summaries[0].ID)
+	if !ok || detail.GatewayType != GatewayTypeProxy || detail.TargetHost != "api.example.com" {
+		t.Fatalf("proxy gateway type missing from detail: %#v", detail)
 	}
 }
 
@@ -203,7 +228,7 @@ func TestEntityCacheSettingsDefaultOnAndPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := store.Settings()
-	if !settings.EntityCacheEnabled || settings.EntityCacheTTLSeconds != 300 {
+	if !settings.EntityCacheEnabled || settings.EntityCacheTTLSeconds != 900 {
 		t.Fatalf("unexpected entity cache defaults: %#v", settings)
 	}
 	settings.EntityCacheEnabled = false

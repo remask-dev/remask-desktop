@@ -201,8 +201,8 @@ function PendingDetail({ pending, retrying, onRetry }: { pending: PendingDownloa
     <section className="detail-section detail-section--summary">
       <h3>{t("downloadStatus")}</h3>
       <dl className="property-grid">
-        <div><dt>{t("status")}</dt><dd className={failed ? "error" : "success"}>{label}</dd></div>
-        <div><dt>{t("quantization")}</dt><dd>{pending.quantization}</dd></div>
+        <div><dt>{t("status")}</dt><dd className={failed ? "error" : "success"} title={label}>{label}</dd></div>
+        <div><dt>{t("quantization")}</dt><dd title={pending.quantization}>{pending.quantization}</dd></div>
       </dl>
       {failed && pending.error && <p className="validation-error">{pending.error}</p>}
     </section>
@@ -238,10 +238,10 @@ function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, onDelete, 
     <section className="detail-section detail-section--summary">
       <h3>{t("modelSpecs")}</h3>
       <dl className="property-grid">
-        <div><dt>{t("quantization")}</dt><dd>{manifest.quantization}</dd></div>
-        <div><dt>{t("version")}</dt><dd><code>{manifest.version}</code></dd></div>
-        <div><dt>{t("labelScheme")}</dt><dd>{manifest.label_scheme}</dd></div>
-        <div><dt>{t("sequence")}</dt><dd>{manifest.max_tokens} / stride {manifest.stride}</dd></div>
+        <div><dt>{t("quantization")}</dt><dd title={manifest.quantization}>{manifest.quantization}</dd></div>
+        <div><dt>{t("version")}</dt><dd><code title={manifest.version}>{manifest.version}</code></dd></div>
+        <div><dt>{t("labelScheme")}</dt><dd title={manifest.label_scheme}>{manifest.label_scheme}</dd></div>
+        <div><dt>{t("sequence")}</dt><dd title={`${manifest.max_tokens} / stride ${manifest.stride}`}>{manifest.max_tokens} / stride {manifest.stride}</dd></div>
       </dl>
     </section>
     <section className="detail-section">

@@ -7,7 +7,11 @@ import (
 )
 
 func TestDefaultPolicyOnlyIncludesEmailRule(t *testing.T) {
-	rules := DefaultPolicySettings().Rules
+	policy := DefaultPolicySettings()
+	if policy.RedactSystemMessages {
+		t.Fatal("system message redaction must be disabled by default")
+	}
+	rules := policy.Rules
 	if len(rules) != 1 {
 		t.Fatalf("expected one preset rule, got %#v", rules)
 	}

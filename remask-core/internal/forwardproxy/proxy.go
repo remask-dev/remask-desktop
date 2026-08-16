@@ -1,7 +1,10 @@
 package forwardproxy
 
 import (
+	"bufio"
+	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"io"
 	"log"
@@ -21,9 +24,9 @@ import (
 
 const connectTimeout = 15 * time.Second
 
-// Proxy is an explicit HTTP proxy. HTTPS destinations that match a configured
-// upstream are inspected locally; all other CONNECT requests are byte-for-byte
-// tunnels and never receive a Remask-issued certificate.
+// Proxy is an explicit HTTP and SOCKS5 proxy. HTTPS destinations that match a
+// configured rule are inspected locally; all other connections are
+// byte-for-byte tunnels and never receive a Remask-issued certificate.
 type Proxy struct {
 	logger    *log.Logger
 	rules     *proxyrule.Registry
@@ -114,19 +117,27 @@ func (p *Proxy) inspectTLS(w http.ResponseWriter, r *http.Request, authority str
 		_ = client.Close()
 		return
 	}
+	p.serveInspectedTLS(r.Context(), client, authority, rule, certificate)
+}
 
+func (p *Proxy) serveInspectedTLS(ctx context.Context, client net.Conn, authority string, rule proxyrule.Rule, certificate tls.Certificate) {
+	host := authorityHostname(authority)
 	tlsConn := tls.Server(client, &tls.Config{
 		Certificates: []tls.Certificate{certificate},
 		MinVersion:   tls.VersionTLS12,
 		NextProtos:   []string{"http/1.1"},
 	})
-	if err := tlsConn.HandshakeContext(r.Context()); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		p.logger.Printf("forward_proxy_tls_handshake_failed host=%s error=%v", host, err)
 		_ = tlsConn.Close()
 		return
 	}
+	p.serveInspectedHTTP(tlsConn, "https", authority, rule)
+}
 
-	listener := newSingleConnListener(tlsConn)
+func (p *Proxy) serveInspectedHTTP(client net.Conn, scheme, authority string, rule proxyrule.Rule) {
+	host := authorityHostname(authority)
+	listener := newSingleConnListener(client)
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
@@ -137,15 +148,169 @@ func (p *Proxy) inspectTLS(w http.ResponseWriter, r *http.Request, authority str
 				return
 			}
 			if isUpgrade(request) {
-				p.reverseUnmodified(response, request, "https://"+authority)
+				p.reverseUnmodified(response, request, scheme+"://"+authority)
 				return
 			}
-			p.gateway.ServeProxyHTTP(response, request, rule.ID, rule.ProfileID, "https://"+authority)
+			p.gateway.ServeProxyHTTP(response, request, rule.ID, rule.ProfileID, scheme+"://"+authority)
 		}),
 	}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 		p.logger.Printf("forward_proxy_tls_server_failed host=%s error=%v", host, err)
 	}
+}
+
+// ServeSOCKS serves one SOCKS5 connection. Only unauthenticated CONNECT is
+// supported. DNS names are kept intact when the client uses remote DNS (for
+// example socks5h://), allowing protected-target rules to match the hostname.
+func (p *Proxy) ServeSOCKS(client net.Conn) {
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(connectTimeout))
+	reader := bufio.NewReader(client)
+	connection := &bufferedConn{Conn: client, reader: reader}
+
+	if err := negotiateSOCKS5(reader, client); err != nil {
+		return
+	}
+	authority, err := readSOCKS5Connect(reader, client)
+	if err != nil {
+		return
+	}
+	p.logger.Printf("forward_proxy_request method=SOCKS5 target=%q path=%q", authority, "-")
+
+	rule, inspect := p.rules.MatchAuthority(authority)
+	if !inspect {
+		p.tunnelSOCKS(connection, authority)
+		return
+	}
+
+	if err := writeSOCKS5Reply(client, socksReplySucceeded, nil); err != nil {
+		return
+	}
+	_ = client.SetDeadline(time.Time{})
+	first, err := reader.Peek(1)
+	if err != nil {
+		return
+	}
+	if first[0] != 0x16 {
+		p.serveInspectedHTTP(connection, "http", authority, rule)
+		return
+	}
+
+	certificate, err := p.authority.CertificateFor(authorityHostname(authority))
+	if err != nil {
+		return
+	}
+	p.serveInspectedTLS(context.Background(), connection, authority, rule, certificate)
+}
+
+func (p *Proxy) tunnelSOCKS(client net.Conn, authority string) {
+	upstream, err := p.dialer.Dial("tcp", authority)
+	if err != nil {
+		_ = writeSOCKS5Reply(client, socksReplyHostUnreachable, nil)
+		return
+	}
+	if err := writeSOCKS5Reply(client, socksReplySucceeded, upstream.LocalAddr()); err != nil {
+		_ = upstream.Close()
+		return
+	}
+	_ = client.SetDeadline(time.Time{})
+	splice(client, upstream)
+}
+
+const (
+	socksReplySucceeded       = byte(0x00)
+	socksReplyGeneralFailure  = byte(0x01)
+	socksReplyCommandRejected = byte(0x07)
+	socksReplyAddressRejected = byte(0x08)
+	socksReplyHostUnreachable = byte(0x04)
+)
+
+func negotiateSOCKS5(reader *bufio.Reader, client io.Writer) error {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(reader, header); err != nil || header[0] != 0x05 || header[1] == 0 {
+		return errors.New("invalid SOCKS5 greeting")
+	}
+	methods := make([]byte, int(header[1]))
+	if _, err := io.ReadFull(reader, methods); err != nil {
+		return err
+	}
+	for _, method := range methods {
+		if method == 0x00 {
+			_, err := client.Write([]byte{0x05, 0x00})
+			return err
+		}
+	}
+	_, _ = client.Write([]byte{0x05, 0xff})
+	return errors.New("SOCKS5 client does not support unauthenticated access")
+}
+
+func readSOCKS5Connect(reader *bufio.Reader, client io.Writer) (string, error) {
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(reader, header); err != nil {
+		return "", err
+	}
+	if header[0] != 0x05 {
+		_ = writeSOCKS5Reply(client, socksReplyGeneralFailure, nil)
+		return "", errors.New("invalid SOCKS5 request version")
+	}
+	if header[1] != 0x01 {
+		_ = writeSOCKS5Reply(client, socksReplyCommandRejected, nil)
+		return "", errors.New("unsupported SOCKS5 command")
+	}
+
+	var host string
+	switch header[3] {
+	case 0x01:
+		address := make([]byte, net.IPv4len)
+		if _, err := io.ReadFull(reader, address); err != nil {
+			return "", err
+		}
+		host = net.IP(address).String()
+	case 0x03:
+		length, err := reader.ReadByte()
+		if err != nil || length == 0 {
+			return "", errors.New("invalid SOCKS5 domain")
+		}
+		address := make([]byte, int(length))
+		if _, err := io.ReadFull(reader, address); err != nil {
+			return "", err
+		}
+		host = string(address)
+	case 0x04:
+		address := make([]byte, net.IPv6len)
+		if _, err := io.ReadFull(reader, address); err != nil {
+			return "", err
+		}
+		host = net.IP(address).String()
+	default:
+		_ = writeSOCKS5Reply(client, socksReplyAddressRejected, nil)
+		return "", errors.New("unsupported SOCKS5 address type")
+	}
+	portBytes := make([]byte, 2)
+	if _, err := io.ReadFull(reader, portBytes); err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(portBytes)))), nil
+}
+
+func writeSOCKS5Reply(client io.Writer, reply byte, bound net.Addr) error {
+	ip := net.IPv4zero
+	port := 0
+	if tcp, ok := bound.(*net.TCPAddr); ok {
+		ip = tcp.IP
+		port = tcp.Port
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		response := []byte{0x05, reply, 0x00, 0x01, ipv4[0], ipv4[1], ipv4[2], ipv4[3], 0x00, 0x00}
+		binary.BigEndian.PutUint16(response[8:], uint16(port))
+		_, err := client.Write(response)
+		return err
+	}
+	response := append([]byte{0x05, reply, 0x00, 0x04}, ip.To16()...)
+	response = append(response, 0x00, 0x00)
+	binary.BigEndian.PutUint16(response[len(response)-2:], uint16(port))
+	_, err := client.Write(response)
+	return err
 }
 
 func requestTargetBaseURL(r *http.Request, fallbackScheme string) string {

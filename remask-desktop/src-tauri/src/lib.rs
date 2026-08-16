@@ -252,18 +252,18 @@ fn spawn_core(
     }
     let forward_proxy_listen_address: SocketAddr = forward_proxy_address
         .parse()
-        .map_err(|_| "forward proxy address must be an IP address and port")?;
+        .map_err(|_| "proxy gateway address must be an IP address and port")?;
     if !forward_proxy_listen_address.ip().is_loopback() || forward_proxy_listen_address.port() == 0
     {
         return Err(
-            "desktop forward proxy must listen on a loopback address and non-zero port".to_string(),
+            "desktop proxy gateway must listen on a loopback address and non-zero port".to_string(),
         );
     }
     if forward_proxy_listen_address == listen_address
         || forward_proxy_listen_address == proxy_listen_address
     {
         return Err(
-            "core, gateway, and forward proxy addresses must use different ports".to_string(),
+            "core, API gateway, and proxy gateway addresses must use different ports".to_string(),
         );
     }
 
@@ -476,6 +476,15 @@ fn launch_app_with_proxy(
     system_integration::launch_app(&app, &app_path, &forward_proxy_address)
 }
 
+#[tauri::command]
+fn launch_preset_with_proxy(
+    app: AppHandle,
+    preset: String,
+    forward_proxy_address: String,
+) -> Result<(), String> {
+    system_integration::launch_preset(&app, &preset, &forward_proxy_address)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -585,7 +594,8 @@ pub fn run() {
             system_certificate_status,
             install_system_certificate,
             launch_ai_client,
-            launch_app_with_proxy
+            launch_app_with_proxy,
+            launch_preset_with_proxy
         ])
         .build(tauri::generate_context!())
         .expect("error while building remask-desktop")

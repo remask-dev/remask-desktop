@@ -29,7 +29,7 @@ import (
 type App struct {
 	handler             http.Handler
 	proxyHandler        http.Handler
-	forwardProxyHandler http.Handler
+	forwardProxyHandler *forwardproxy.Proxy
 	proxyAuthority      *mitm.Authority
 }
 
@@ -208,6 +208,8 @@ func (a *App) ProxyHandler() http.Handler {
 }
 
 func (a *App) ForwardProxyHandler() http.Handler { return a.forwardProxyHandler }
+
+func (a *App) ForwardProxy() *forwardproxy.Proxy { return a.forwardProxyHandler }
 
 func (a *App) ProxyAuthorityStatus() mitm.Status { return a.proxyAuthority.Status() }
 

@@ -23,10 +23,11 @@ type EntityTypeConfig struct {
 }
 
 type PolicySettings struct {
-	Enabled         bool               `json:"enabled"`
-	RedactAIAnswers bool               `json:"redact_ai_answers"`
-	EntityTypes     []EntityTypeConfig `json:"entity_types"`
-	Rules           []RuleConfig       `json:"rules"`
+	Enabled              bool               `json:"enabled"`
+	RedactAIAnswers      bool               `json:"redact_ai_answers"`
+	RedactSystemMessages bool               `json:"redact_system_messages"`
+	EntityTypes          []EntityTypeConfig `json:"entity_types"`
+	Rules                []RuleConfig       `json:"rules"`
 }
 
 type compiledRule struct {
@@ -137,6 +138,12 @@ func (d *RuleDetector) RedactAIAnswers() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.policy.RedactAIAnswers
+}
+
+func (d *RuleDetector) RedactSystemMessages() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.policy.RedactSystemMessages
 }
 
 func (d *RuleDetector) EntityEnabled(entityType string) bool {

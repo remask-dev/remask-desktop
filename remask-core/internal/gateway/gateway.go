@@ -86,24 +86,24 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// provider-agnostic operation protect the request body.
 		if routeErr.code == "AUTO_UPSTREAM_NOT_FOUND" {
 			if fallback, ok := g.resolveGenericRoute(r); ok {
-				g.serveResolved(w, r, targetFromUpstream(fallback), r.URL.Path, profile.GenericOperation(), true)
+				g.serveResolved(w, r, targetFromUpstream(fallback), r.URL.Path, profile.GenericOperation(), true, audit.GatewayTypeAPI)
 				return
 			}
 		}
 		writeProxyError(w, routeErr.status, routeErr.code, routeErr.message)
 		return
 	}
-	g.serveResolved(w, r, targetFromUpstream(configured), upstreamPath, operation, matched)
+	g.serveResolved(w, r, targetFromUpstream(configured), upstreamPath, operation, matched, audit.GatewayTypeAPI)
 }
 
 // ServeProxyHTTP protects an explicit-proxy request without using a Provider
 // as its destination. targetBaseURL is derived from the original proxy request;
 // the rule contributes only its audit identity and protocol profile.
 func (g *Gateway) ServeProxyHTTP(w http.ResponseWriter, r *http.Request, ruleID, profileID, targetBaseURL string) {
-	g.serveResolved(w, r, targetConfig{ID: "proxy-rule:" + ruleID, BaseURL: targetBaseURL, ProfileID: profileID}, r.URL.Path, profile.Operation{}, false)
+	g.serveResolved(w, r, targetConfig{ID: ruleID, BaseURL: targetBaseURL, ProfileID: profileID}, r.URL.Path, profile.Operation{}, false, audit.GatewayTypeProxy)
 }
 
-func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured targetConfig, upstreamPath string, operation profile.Operation, matched bool) {
+func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured targetConfig, upstreamPath string, operation profile.Operation, matched bool, gatewayType string) {
 	redactionDuration := int64(0)
 	debug := g.DebugMode()
 	counted := &countingResponseWriter{ResponseWriter: w}
@@ -134,7 +134,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	auditEntry := audit.Entry{
 		Timestamp: time.Now().UTC(), UpstreamID: configured.ID, ProfileID: configured.ProfileID,
 		OperationID: operationID, Model: extractModelFromPath(upstreamPath), ProtectionMode: protectionMode,
-		Method: r.Method, Path: upstreamPath,
+		GatewayType: gatewayType, TargetHost: targetHostname(configured.BaseURL), Method: r.Method, Path: upstreamPath,
 	}
 	defer func() {
 		for _, field := range auditEntry.Fields {
@@ -237,7 +237,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	scopeID := ""
 	if !passthrough && len(body) > 0 && isJSON(r.Header.Get("Content-Type")) {
 		redactStarted := time.Now()
-		forwardBody, scopeID, auditEntry.Fields, err = g.redactJSON(r.Context(), body, operation, g.rules.RedactAIAnswers(), scopeID)
+		forwardBody, scopeID, auditEntry.Fields, err = g.redactJSON(r.Context(), body, operation, g.rules.RedactAIAnswers(), g.rules.RedactSystemMessages(), scopeID)
 		redactionDuration += time.Since(redactStarted).Milliseconds()
 		if err != nil {
 			auditEntry.ErrorCode = "REDACTION_FAILED"
@@ -332,6 +332,14 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	w.Header().Del("ETag")
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(responseBody)
+}
+
+func targetHostname(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
 }
 
 func (g *Gateway) serveOversizedPassthrough(w http.ResponseWriter, r *http.Request, configured targetConfig, upstreamPath string, body io.Reader, auditEntry *audit.Entry) {
@@ -651,25 +659,35 @@ func looksLikeJSON(value string) bool {
 	return strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[")
 }
 
-func (g *Gateway) redactJSON(ctx context.Context, body []byte, operation profile.Operation, redactAIAnswers bool, scopeID string) ([]byte, string, []audit.Field, error) {
+func (g *Gateway) redactJSON(ctx context.Context, body []byte, operation profile.Operation, redactAIAnswers, redactSystemMessages bool, scopeID string) ([]byte, string, []audit.Field, error) {
 	currentScope := scopeID
-	assistantPaths := make(map[string]struct{})
-	if !redactAIAnswers {
+	excludedPaths := make(map[string]struct{})
+	if !redactAIAnswers || !redactSystemMessages {
 		roles, err := g.documents.ExtractStrings(body, operation.AssistantRoleFields)
 		if err != nil {
 			return nil, scopeID, nil, err
 		}
 		for _, role := range roles {
-			if stringInSliceFold(role.Value, operation.AssistantRoles) {
+			if !redactAIAnswers && stringInSliceFold(role.Value, operation.AssistantRoles) ||
+				!redactSystemMessages && strings.EqualFold(role.Value, "system") {
 				if separator := strings.LastIndexByte(role.Path, '/'); separator > 0 {
-					assistantPaths[role.Path[:separator]] = struct{}{}
+					excludedPaths[role.Path[:separator]] = struct{}{}
 				}
 			}
 		}
 	}
+	if !redactSystemMessages {
+		systemFields, err := g.documents.ExtractStrings(body, operation.SystemTextFields)
+		if err != nil {
+			return nil, scopeID, nil, err
+		}
+		for _, field := range systemFields {
+			excludedPaths[field.Path] = struct{}{}
+		}
+	}
 	fields := make([]audit.Field, 0)
 	transformed, err := g.documents.TransformJSONMatches(body, operation.RequestTextFields, func(match document.TextMatch) (string, error) {
-		if hasPathAncestor(match.Path, assistantPaths) {
+		if hasPathAncestor(match.Path, excludedPaths) {
 			return match.Value, nil
 		}
 		result, err := g.pii.Redact(ctx, match.Value, currentScope)

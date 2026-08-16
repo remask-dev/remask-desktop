@@ -29,7 +29,7 @@ type Settings struct {
 }
 
 func DefaultSettings() Settings {
-	return Settings{RecordRequestContent: true, RetentionDays: 30, MaxInferenceTokens: 512, InferenceProvider: "cpu", EntityCacheEnabled: true, EntityCacheTTLSeconds: 300}
+	return Settings{RecordRequestContent: true, RetentionDays: 30, MaxInferenceTokens: 512, InferenceProvider: "cpu", EntityCacheEnabled: true, EntityCacheTTLSeconds: 900}
 }
 
 func (s Settings) Validate() error {
@@ -58,7 +58,9 @@ func (s Settings) Validate() error {
 }
 
 const (
-	maxAuditEntries = 2000
+	maxAuditEntries  = 2000
+	GatewayTypeAPI   = "api_gateway"
+	GatewayTypeProxy = "proxy_gateway"
 )
 
 type Entity struct {
@@ -109,6 +111,8 @@ type Entry struct {
 	OperationID    string         `json:"operation_id"`
 	Model          string         `json:"model,omitempty"`
 	ProtectionMode string         `json:"protection_mode,omitempty"`
+	GatewayType    string         `json:"gateway_type"`
+	TargetHost     string         `json:"target_host,omitempty"`
 	Method         string         `json:"method"`
 	Path           string         `json:"path"`
 	StatusCode     int            `json:"status_code"`
@@ -231,6 +235,8 @@ func (s *Store) initialize() error {
 			operation_id TEXT NOT NULL,
 			model TEXT NOT NULL DEFAULT '',
 			protection_mode TEXT NOT NULL,
+			gateway_type TEXT NOT NULL DEFAULT '',
+			target_host TEXT NOT NULL DEFAULT '',
 			method TEXT NOT NULL,
 			path TEXT NOT NULL,
 			status_code INTEGER NOT NULL,
@@ -294,6 +300,9 @@ func (s *Store) Add(entry Entry) error {
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
 	}
+	if entry.GatewayType != GatewayTypeProxy {
+		entry.GatewayType = GatewayTypeAPI
+	}
 	// Request logs are always recorded as metadata. The content toggle only
 	// controls whether masked field previews and AI-bound payloads are kept;
 	// aggregate counters such as entity_count stay intact for statistics.
@@ -321,12 +330,12 @@ func (s *Store) Add(entry Entry) error {
 	}
 	defer tx.Rollback()
 	_, err = tx.Exec(`INSERT INTO audit_entries (
-		id, timestamp, upstream_id, profile_id, operation_id, model, protection_mode, method, path,
+		id, timestamp, upstream_id, profile_id, operation_id, model, protection_mode, gateway_type, target_host, method, path,
 		status_code, duration_ms, streaming, request_bytes, response_bytes, entity_count,
 		token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.Timestamp.UTC().Format(timestampLayout), entry.UpstreamID, entry.ProfileID,
-		entry.OperationID, entry.Model, entry.ProtectionMode, entry.Method, entry.Path, entry.StatusCode,
+		entry.OperationID, entry.Model, entry.ProtectionMode, entry.GatewayType, entry.TargetHost, entry.Method, entry.Path, entry.StatusCode,
 		entry.DurationMS, entry.Streaming, entry.RequestBytes, entry.ResponseBytes, entry.EntityCount,
 		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), extra, entry.ErrorCode)
 	if err != nil {
@@ -413,12 +422,12 @@ func (s *Store) List(query Query) []Entry {
 		clauses = append(clauses, "(status_code < 200 OR status_code >= 400)")
 	}
 	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
-		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
+		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || gateway_type || ' ' || target_host || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
 		args = append(args, "%"+search+"%")
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
-		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
+		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
 		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
 		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
 	if err != nil {
@@ -430,7 +439,7 @@ func (s *Store) List(query Query) []Entry {
 		var entry Entry
 		var timestamp, fields, extra string
 		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
-			&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
+			&entry.ProtectionMode, &entry.GatewayType, &entry.TargetHost, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
 			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &extra, &entry.ErrorCode); err != nil {
 			continue
@@ -464,12 +473,12 @@ func (s *Store) ListSummaries(query Query) []Entry {
 		clauses = append(clauses, "(status_code < 200 OR status_code >= 400)")
 	}
 	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
-		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
+		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || gateway_type || ' ' || target_host || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
 		args = append(args, "%"+search+"%")
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
-		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
+		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
 		response_bytes, entity_count, token_input, token_output, token_total, token_cached, error_code
 		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
 	if err != nil {
@@ -481,7 +490,7 @@ func (s *Store) ListSummaries(query Query) []Entry {
 		var entry Entry
 		var timestamp string
 		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
-			&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
+			&entry.ProtectionMode, &entry.GatewayType, &entry.TargetHost, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
 			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &entry.ErrorCode); err != nil {
 			continue
@@ -499,11 +508,11 @@ func (s *Store) Get(id string) (Entry, bool) {
 	var entry Entry
 	var timestamp, fields, extra string
 	err := s.db.QueryRow(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
-		protection_mode, method, path, status_code, duration_ms, streaming, request_bytes,
+		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
 		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
 		FROM audit_entries WHERE id = ?`, id).Scan(
 		&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
-		&entry.ProtectionMode, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
+		&entry.ProtectionMode, &entry.GatewayType, &entry.TargetHost, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 		&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
 		&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &extra, &entry.ErrorCode)
 	if err != nil {

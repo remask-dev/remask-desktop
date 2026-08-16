@@ -14,7 +14,7 @@ const (
 	// DefaultEntityCacheTTL is deliberately short enough to avoid retaining
 	// detector results after a policy/model change, while still covering the
 	// common repeated-request window.
-	DefaultEntityCacheTTL        = 5 * time.Minute
+	DefaultEntityCacheTTL        = 15 * time.Minute
 	DefaultEntityCacheMaxEntries = 4096
 	minimumEntityCacheTTL        = 10 * time.Millisecond
 	maximumEntityCacheTTL        = 24 * time.Hour

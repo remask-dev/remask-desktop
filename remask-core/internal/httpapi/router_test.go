@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/remask/remask-core/internal/app"
+	"github.com/remask/remask-core/internal/pii"
 )
 
 func TestRedactAndRestoreAPI(t *testing.T) {
@@ -101,6 +102,12 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 	logsBody := logsResponse.Body.String()
 	if strings.Contains(logsBody, "foo@example.com") || strings.Contains(logsBody, "foo***com") || strings.Contains(logsBody, `MASK_EMAIL`) || strings.Contains(logsBody, `"fields"`) {
 		t.Fatalf("audit list included request content: %s", logsBody)
+	}
+	if !strings.Contains(logsBody, `"gateway_type":"api_gateway"`) {
+		t.Fatalf("audit list did not identify the API gateway: %s", logsBody)
+	}
+	if !strings.Contains(logsBody, `"target_host":"mock.example"`) {
+		t.Fatalf("audit list did not include the target host: %s", logsBody)
 	}
 	var listed struct {
 		Logs []struct {
@@ -296,7 +303,7 @@ func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
 	}
 }
 
-func TestJSONProxyDoesNotRedactAIAnswersByDefault(t *testing.T) {
+func TestJSONProxyDoesNotRedactAssistantOrSystemMessagesByDefault(t *testing.T) {
 	var upstreamBody []byte
 	handler := testHandlerWithClient(t, &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		upstreamBody, _ = io.ReadAll(r.Body)
@@ -304,12 +311,66 @@ func TestJSONProxyDoesNotRedactAIAnswersByDefault(t *testing.T) {
 	})})
 	configureUpstream(t, handler)
 
-	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"assistant","content":"AI saw assistant@example.com"},{"role":"user","content":"user@example.com"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"system","content":"Contact system@example.com"},{"role":"assistant","content":"AI saw assistant@example.com"},{"role":"user","content":"user@example.com"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK || !strings.Contains(string(upstreamBody), "assistant@example.com") || strings.Contains(string(upstreamBody), "user@example.com") {
+	if response.Code != http.StatusOK || !strings.Contains(string(upstreamBody), "system@example.com") || !strings.Contains(string(upstreamBody), "assistant@example.com") || strings.Contains(string(upstreamBody), "user@example.com") {
+		t.Fatalf("unexpected upstream body: status=%d body=%s", response.Code, upstreamBody)
+	}
+}
+
+func TestPolicyPartialUpdatesPreserveOtherFields(t *testing.T) {
+	handler := testHandlerWithClient(t, http.DefaultClient)
+
+	update := func(body string) pii.PolicySettings {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPut, "/api/v1/policy", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("update policy: %d %s", response.Code, response.Body.String())
+		}
+		var policy pii.PolicySettings
+		if err := json.Unmarshal(response.Body.Bytes(), &policy); err != nil {
+			t.Fatal(err)
+		}
+		return policy
+	}
+
+	policy := update(`{"redact_ai_answers":true}`)
+	if !policy.Enabled || !policy.RedactAIAnswers || policy.RedactSystemMessages || len(policy.Rules) == 0 {
+		t.Fatalf("AI history patch overwrote policy fields: %#v", policy)
+	}
+	policy = update(`{"redact_system_messages":true}`)
+	if !policy.Enabled || !policy.RedactAIAnswers || !policy.RedactSystemMessages || len(policy.Rules) == 0 {
+		t.Fatalf("system patch overwrote policy fields: %#v", policy)
+	}
+}
+
+func TestJSONProxyRedactsSystemMessagesWhenEnabled(t *testing.T) {
+	var upstreamBody []byte
+	handler := testHandlerWithClient(t, &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}]}`)), Request: r}, nil
+	})})
+	configureUpstream(t, handler)
+	policy := httptest.NewRequest(http.MethodPut, "/api/v1/policy", strings.NewReader(`{"enabled":true,"redact_system_messages":true,"entity_types":[],"rules":[{"id":"email","pattern":"(?i)\\b[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}\\b","enabled":true}]}`))
+	policy.Header.Set("Content-Type", "application/json")
+	policyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(policyResponse, policy)
+	if policyResponse.Code != http.StatusOK {
+		t.Fatalf("configure policy: %d %s", policyResponse.Code, policyResponse.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/custom-completions", strings.NewReader(`{"model":"custom-model","instructions":"Contact instructions@example.com","system":"Contact top-level@example.com","messages":[{"role":"system","content":"Contact role@example.com"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || strings.Contains(string(upstreamBody), "@example.com") || strings.Count(string(upstreamBody), "<MASK_EMAIL:") != 3 {
 		t.Fatalf("unexpected upstream body: status=%d body=%s", response.Code, upstreamBody)
 	}
 }
@@ -539,7 +600,7 @@ func TestUnmatchedModelPathUsesGenericStrategy(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK || strings.Contains(receivedBody, "foo@example.com") || !strings.Contains(receivedBody, "<MASK_EMAIL:") {
+	if response.Code != http.StatusOK || strings.Count(receivedBody, "foo@example.com") != 2 || !strings.Contains(receivedBody, "<MASK_EMAIL:") {
 		t.Fatalf("generic fallback did not redact request: status=%d body=%q", response.Code, receivedBody)
 	}
 	if strings.Count(response.Body.String(), "foo@example.com") != 4 || strings.Contains(response.Body.String(), "<MASK_EMAIL:") {
