@@ -20,6 +20,23 @@ type Upstream struct {
 	DefaultPolicy  string `json:"default_policy,omitempty"`
 	CredentialMode string `json:"credential_mode"`
 	APIKey         string `json:"api_key,omitempty"`
+	Enabled        bool   `json:"enabled"`
+}
+
+// UnmarshalJSON keeps configurations written before the enabled switch
+// backward-compatible: an omitted value means the provider remains enabled.
+func (u *Upstream) UnmarshalJSON(data []byte) error {
+	type upstreamJSON Upstream
+	var decoded struct {
+		upstreamJSON
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = Upstream(decoded.upstreamJSON)
+	u.Enabled = decoded.Enabled == nil || *decoded.Enabled
+	return nil
 }
 
 func (u Upstream) Validate() error {
@@ -53,9 +70,9 @@ type Registry struct {
 
 func DefaultUpstreams() []Upstream {
 	return []Upstream{
-		{ID: "anthropic", BaseURL: "https://api.anthropic.com", ProfileID: "anthropic", CredentialMode: "passthrough"},
-		{ID: "codex-chatgpt", BaseURL: "https://chatgpt.com", ProfileID: "codex-chatgpt", CredentialMode: "passthrough"},
-		{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough"},
+		{ID: "anthropic", BaseURL: "https://api.anthropic.com", ProfileID: "anthropic", CredentialMode: "passthrough", Enabled: true},
+		{ID: "codex-chatgpt", BaseURL: "https://chatgpt.com", ProfileID: "codex-chatgpt", CredentialMode: "passthrough", Enabled: true},
+		{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough", Enabled: true},
 	}
 }
 
@@ -94,7 +111,7 @@ func NewRegistry(dataDir string) (*Registry, error) {
 		}
 		registry.items[item.ID] = item
 	}
-	legacyOpenAI := Upstream{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough"}
+	legacyOpenAI := Upstream{ID: "openai", BaseURL: "https://api.openai.com", ProfileID: "openai", CredentialMode: "passthrough", Enabled: true}
 	if len(registry.items) == 1 && registry.items[legacyOpenAI.ID] == legacyOpenAI {
 		for _, item := range DefaultUpstreams() {
 			registry.items[item.ID] = item
@@ -141,41 +158,6 @@ func (r *Registry) List() []Upstream {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
-}
-
-// FindByAuthority returns the first configured upstream whose base URL host
-// matches an HTTP proxy authority. Registry order is stable by service ID.
-func (r *Registry) FindByAuthority(authority string) (Upstream, bool) {
-	hostname, requestedPort := splitAuthority(authority)
-	if hostname == "" {
-		return Upstream{}, false
-	}
-	for _, item := range r.List() {
-		parsed, err := url.Parse(item.BaseURL)
-		if err != nil || !strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), hostname) {
-			continue
-		}
-		expectedPort := parsed.Port()
-		if expectedPort == "" {
-			if parsed.Scheme == "https" {
-				expectedPort = "443"
-			} else if parsed.Scheme == "http" {
-				expectedPort = "80"
-			}
-		}
-		if requestedPort == "" || expectedPort == requestedPort {
-			return item, true
-		}
-	}
-	return Upstream{}, false
-}
-
-func splitAuthority(authority string) (string, string) {
-	authority = strings.TrimSpace(authority)
-	if parsed, err := url.Parse("//" + authority); err == nil && parsed.Hostname() != "" {
-		return strings.ToLower(strings.TrimSuffix(parsed.Hostname(), ".")), parsed.Port()
-	}
-	return strings.ToLower(strings.Trim(strings.TrimSuffix(authority, "."), "[]")), ""
 }
 
 func (r *Registry) Delete(id string) error {

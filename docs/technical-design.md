@@ -26,7 +26,7 @@ Remask 在 AI 客户端和上游 AI API 之间提供本地 PII 保护：请求�
 首版支持：
 
 - HTTP/HTTPS 反向代理。
-- 标准 HTTP 正向代理和 HTTPS `CONNECT`；仅对已配置 AI 域名使用本地 CA 解密。
+- 标准 HTTP 正向代理和 HTTPS `CONNECT`；仅对独立配置的“保护目标”使用本地 CA 解密。
 - `application/json` 请求和非流式响应。
 - `text/event-stream` SSE 响应。
 - OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Gemini GenerateContent 等内置 Profile。
@@ -75,6 +75,7 @@ AI Client / remask-desktop
 - PII Pipeline 只接收文本，不感知 HTTP、SSE 或 AI 厂商。
 - Profile 只描述路由、文本字段和流事件字段，不实现实体识别。
 - Proxy 只负责协议保持、超时、取消、Header 和流控。
+- HTTP 正向代理的真实目标始终来自请求 URL 或 `CONNECT` authority；保护目标规则只负责域名匹配和选择 Profile，不得通过 Upstream 改写目的地址。
 - Tauri 不链接 Go 源码，只调用 `remask-core` 的版本化 HTTP API。
 - 代理入口在单一端口下使用 `/proxy/{upstream}` 命名空间；转发前剥离该前缀，其余 path、query、method、Header、JSON 和 SSE 语义保持不变。
 
@@ -105,6 +106,7 @@ remask/
 │   │   ├── model/
 │   │   ├── policy/
 │   │   ├── upstream/
+│   │   ├── proxyrule/
 │   │   └── operation/
 │   ├── profiles/
 │   ├── schemas/

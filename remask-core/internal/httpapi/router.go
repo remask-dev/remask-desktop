@@ -19,6 +19,7 @@ import (
 	"github.com/remask/remask-core/internal/operation"
 	"github.com/remask/remask-core/internal/pii"
 	"github.com/remask/remask-core/internal/profile"
+	"github.com/remask/remask-core/internal/proxyrule"
 	"github.com/remask/remask-core/internal/scope"
 	"github.com/remask/remask-core/internal/upstream"
 )
@@ -30,6 +31,7 @@ type Router struct {
 	pii        *pii.Service
 	profiles   *profile.Registry
 	upstreams  *upstream.Registry
+	proxyRules *proxyrule.Registry
 	models     *model.Manager
 	operations *operation.Store
 	audits     *audit.Store
@@ -38,13 +40,13 @@ type Router struct {
 	startedAt  time.Time
 }
 
-func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Registry, upstreams *upstream.Registry, models *model.Manager, operations *operation.Store, audits *audit.Store, authority *mitm.Authority, configuredRules ...*pii.RuleDetector) http.Handler {
+func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Registry, upstreams *upstream.Registry, proxyRules *proxyrule.Registry, models *model.Manager, operations *operation.Store, audits *audit.Store, authority *mitm.Authority, configuredRules ...*pii.RuleDetector) http.Handler {
 	rules := pii.NewRuleDetector()
 	if len(configuredRules) > 0 && configuredRules[0] != nil {
 		rules = configuredRules[0]
 	}
 	router := &Router{
-		logger: logger, pii: service, profiles: profiles, upstreams: upstreams, models: models, operations: operations, audits: audits, rules: rules, authority: authority,
+		logger: logger, pii: service, profiles: profiles, upstreams: upstreams, proxyRules: proxyRules, models: models, operations: operations, audits: audits, rules: rules, authority: authority,
 		startedAt: time.Now().UTC(),
 	}
 	mux := http.NewServeMux()
@@ -63,6 +65,10 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 	mux.HandleFunc("GET /api/v1/upstreams/{upstream_id}", router.getUpstream)
 	mux.HandleFunc("PUT /api/v1/upstreams/{upstream_id}", router.putUpstream)
 	mux.HandleFunc("DELETE /api/v1/upstreams/{upstream_id}", router.deleteUpstream)
+	mux.HandleFunc("GET /api/v1/proxy-rules", router.listProxyRules)
+	mux.HandleFunc("POST /api/v1/proxy-rules", router.putProxyRule)
+	mux.HandleFunc("PUT /api/v1/proxy-rules/{proxy_rule_id}", router.putProxyRule)
+	mux.HandleFunc("DELETE /api/v1/proxy-rules/{proxy_rule_id}", router.deleteProxyRule)
 	mux.HandleFunc("GET /api/v1/models", router.listModels)
 	mux.HandleFunc("POST /api/v1/models/scan", router.scanModels)
 	mux.HandleFunc("GET /api/v1/models/catalog", router.modelCatalog)
@@ -129,7 +135,7 @@ func (r *Router) proxyCAStatus(w http.ResponseWriter, _ *http.Request) {
 func (r *Router) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": "remask-core", "version": "0.1.0-dev", "api_version": "v1",
-		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.selective-mitm", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
+		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.selective-mitm", "proxy.rules.persisted", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
 		"model_runtime": r.models.RuntimeStatus(),
 	})
 }
@@ -278,6 +284,38 @@ func (r *Router) putUpstream(w http.ResponseWriter, request *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, item.Public())
+}
+
+func (r *Router) listProxyRules(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"proxy_rules": r.proxyRules.List()})
+}
+
+func (r *Router) putProxyRule(w http.ResponseWriter, request *http.Request) {
+	var item proxyrule.Rule
+	if !decodeJSON(w, request, &item) {
+		return
+	}
+	pathID := request.PathValue("proxy_rule_id")
+	if pathID != "" {
+		if item.ID != "" && item.ID != pathID {
+			writeError(w, http.StatusBadRequest, "PROXY_RULE_ID_MISMATCH", "body id must match path id")
+			return
+		}
+		item.ID = pathID
+	}
+	if _, ok := r.profiles.Get(item.ProfileID); !ok {
+		writeError(w, http.StatusBadRequest, "PROFILE_NOT_FOUND", "profile_id is not configured")
+		return
+	}
+	if err := r.proxyRules.Put(item); err != nil {
+		writeError(w, http.StatusBadRequest, "PROXY_RULE_INVALID", err.Error())
+		return
+	}
+	status := http.StatusCreated
+	if request.Method == http.MethodPut {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, item)
 }
 
 func (r *Router) listAuditLogs(w http.ResponseWriter, request *http.Request) {
@@ -496,6 +534,14 @@ func (r *Router) downloadModel(w http.ResponseWriter, request *http.Request) {
 func (r *Router) deleteUpstream(w http.ResponseWriter, request *http.Request) {
 	if err := r.upstreams.Delete(request.PathValue("upstream_id")); err != nil {
 		writeError(w, http.StatusNotFound, "UPSTREAM_NOT_FOUND", "upstream is not configured")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (r *Router) deleteProxyRule(w http.ResponseWriter, request *http.Request) {
+	if err := r.proxyRules.Delete(request.PathValue("proxy_rule_id")); err != nil {
+		writeError(w, http.StatusNotFound, "PROXY_RULE_NOT_FOUND", "proxy rule is not configured")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

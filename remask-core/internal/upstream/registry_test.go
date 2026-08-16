@@ -56,6 +56,34 @@ func TestRegistryMigratesLegacyOpenAIDefault(t *testing.T) {
 	}
 }
 
+func TestRegistryDefaultsLegacyEnabledStateAndPersistsDisabledState(t *testing.T) {
+	directory := t.TempDir()
+	legacy := `[{"id":"custom","base_url":"https://example.com","profile_id":"openai","credential_mode":"passthrough"}]`
+	if err := os.WriteFile(filepath.Join(directory, "upstreams.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewRegistry(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := registry.Get("custom")
+	if err != nil || !item.Enabled {
+		t.Fatalf("legacy upstream should default to enabled: %#v, %v", item, err)
+	}
+	item.Enabled = false
+	if err := registry.Put(item); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := NewRegistry(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err = reloaded.Get("custom")
+	if err != nil || item.Enabled {
+		t.Fatalf("disabled upstream was not persisted: %#v, %v", item, err)
+	}
+}
+
 func TestRegistryPersistsUpstreamsAndMasksHeaders(t *testing.T) {
 	directory := t.TempDir()
 	registry, err := NewRegistry(directory)
@@ -98,22 +126,5 @@ func TestRegistryRemovesManagedHeadersWhenSwitchingToPassthrough(t *testing.T) {
 	}
 	if stored.APIKey != "" {
 		t.Fatalf("passthrough upstream retained managed API key: %#v", stored.APIKey)
-	}
-}
-
-func TestRegistryMatchesProxyAuthorityIncludingConfiguredPort(t *testing.T) {
-	registry, err := NewRegistry("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	item := Upstream{ID: "local", BaseURL: "https://127.0.0.1:9443", ProfileID: "openai", CredentialMode: "passthrough"}
-	if err := registry.Put(item); err != nil {
-		t.Fatal(err)
-	}
-	if matched, ok := registry.FindByAuthority("127.0.0.1:9443"); !ok || matched.ID != item.ID {
-		t.Fatalf("configured authority did not match: %#v, %t", matched, ok)
-	}
-	if _, ok := registry.FindByAuthority("127.0.0.1:443"); ok {
-		t.Fatal("different authority port unexpectedly matched")
 	}
 }

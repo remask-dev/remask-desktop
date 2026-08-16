@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -32,7 +33,7 @@ func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configureUpstream(t, application.Handler(), upstreamServer.URL)
+	configureProxyRule(t, application.Handler(), upstreamServer.URL)
 	proxyServer := httptest.NewServer(application.ForwardProxyHandler())
 	defer proxyServer.Close()
 
@@ -69,7 +70,7 @@ func TestConfiguredHTTPSUnmatchedPathPassesThrough(t *testing.T) {
 	defer upstreamServer.Close()
 
 	application := newTestApp(t, upstreamServer.Client())
-	configureUpstream(t, application.Handler(), upstreamServer.URL)
+	configureProxyRule(t, application.Handler(), upstreamServer.URL)
 	proxyServer := httptest.NewServer(application.ForwardProxyHandler())
 	defer proxyServer.Close()
 
@@ -162,17 +163,22 @@ func newTestApp(t *testing.T, upstreamClient *http.Client) *app.App {
 	return application
 }
 
-func configureUpstream(t *testing.T, handler http.Handler, baseURL string) {
+func configureProxyRule(t *testing.T, handler http.Handler, targetURL string) {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{
-		"id": "test", "base_url": baseURL, "profile_id": "openai", "credential_mode": "passthrough",
+	parsed, _ := url.Parse(targetURL)
+	port := 443
+	if parsed.Port() != "" {
+		_, _ = fmt.Sscanf(parsed.Port(), "%d", &port)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"id": "test", "hosts": []string{parsed.Hostname()}, "port": port, "profile_id": "openai", "enabled": true,
 	})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(string(body)))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/proxy-rules", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
-		t.Fatalf("configure upstream: %d %s", response.Code, response.Body.String())
+		t.Fatalf("configure proxy rule: %d %s", response.Code, response.Body.String())
 	}
 }
 

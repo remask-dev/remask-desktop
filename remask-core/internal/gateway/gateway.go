@@ -38,6 +38,17 @@ type Gateway struct {
 	rules      *pii.RuleDetector
 }
 
+type targetConfig struct {
+	ID        string
+	BaseURL   string
+	ProfileID string
+	APIKey    string
+}
+
+func targetFromUpstream(item upstream.Upstream) targetConfig {
+	return targetConfig{ID: item.ID, BaseURL: item.BaseURL, ProfileID: item.ProfileID, APIKey: item.APIKey}
+}
+
 func New(logger *log.Logger, upstreams *upstream.Registry, profiles *profile.Registry, service *pii.Service, audits *audit.Store, httpClient *http.Client, configuredRules ...*pii.RuleDetector) *Gateway {
 	if httpClient == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -75,24 +86,24 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// provider-agnostic operation protect the request body.
 		if routeErr.code == "AUTO_UPSTREAM_NOT_FOUND" {
 			if fallback, ok := g.resolveGenericRoute(r); ok {
-				g.serveResolved(w, r, fallback, r.URL.Path, profile.GenericOperation(), true)
+				g.serveResolved(w, r, targetFromUpstream(fallback), r.URL.Path, profile.GenericOperation(), true)
 				return
 			}
 		}
 		writeProxyError(w, routeErr.status, routeErr.code, routeErr.message)
 		return
 	}
-	g.serveResolved(w, r, configured, upstreamPath, operation, matched)
+	g.serveResolved(w, r, targetFromUpstream(configured), upstreamPath, operation, matched)
 }
 
-// ServeUpstreamHTTP processes a request whose destination has already been
-// resolved by the explicit forward proxy. Unmatched operations retain the
-// gateway's transparent passthrough behavior.
-func (g *Gateway) ServeUpstreamHTTP(w http.ResponseWriter, r *http.Request, configured upstream.Upstream) {
-	g.serveResolved(w, r, configured, r.URL.Path, profile.Operation{}, false)
+// ServeProxyHTTP protects an explicit-proxy request without using a Provider
+// as its destination. targetBaseURL is derived from the original proxy request;
+// the rule contributes only its audit identity and protocol profile.
+func (g *Gateway) ServeProxyHTTP(w http.ResponseWriter, r *http.Request, ruleID, profileID, targetBaseURL string) {
+	g.serveResolved(w, r, targetConfig{ID: "proxy-rule:" + ruleID, BaseURL: targetBaseURL, ProfileID: profileID}, r.URL.Path, profile.Operation{}, false)
 }
 
-func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured upstream.Upstream, upstreamPath string, operation profile.Operation, matched bool) {
+func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured targetConfig, upstreamPath string, operation profile.Operation, matched bool) {
 	redactionDuration := int64(0)
 	debug := g.DebugMode()
 	counted := &countingResponseWriter{ResponseWriter: w}
@@ -323,7 +334,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	_, _ = w.Write(responseBody)
 }
 
-func (g *Gateway) serveOversizedPassthrough(w http.ResponseWriter, r *http.Request, configured upstream.Upstream, upstreamPath string, body io.Reader, auditEntry *audit.Entry) {
+func (g *Gateway) serveOversizedPassthrough(w http.ResponseWriter, r *http.Request, configured targetConfig, upstreamPath string, body io.Reader, auditEntry *audit.Entry) {
 	target, err := buildTarget(configured.BaseURL, upstreamPath, r.URL.RawQuery)
 	if err != nil {
 		auditEntry.ErrorCode = "UPSTREAM_URL_INVALID"
@@ -358,7 +369,7 @@ func (g *Gateway) serveOversizedPassthrough(w http.ResponseWriter, r *http.Reque
 	g.servePassthrough(w, response, streaming, &auditEntry.TokenUsage)
 }
 
-func (g *Gateway) applyManagedHeaders(request *http.Request, configured upstream.Upstream) {
+func (g *Gateway) applyManagedHeaders(request *http.Request, configured targetConfig) {
 	if configured.APIKey == "" {
 		return
 	}
@@ -385,6 +396,11 @@ func (g *Gateway) resolveRoute(method, requestPath string) (upstream.Upstream, s
 		}
 		configured, err := g.upstreams.Get(selector)
 		if err == nil {
+			if !configured.Enabled {
+				return upstream.Upstream{}, "", profile.Operation{}, false, &routeError{
+					status: http.StatusServiceUnavailable, code: "UPSTREAM_DISABLED", message: "the selected provider is disabled",
+				}
+			}
 			return configured, upstreamPath, profile.Operation{}, false, nil
 		}
 		matches := g.upstreamsByDomain(selector)
@@ -402,6 +418,9 @@ func (g *Gateway) resolveRoute(method, requestPath string) (upstream.Upstream, s
 	}
 	candidates := make([]candidate, 0, 2)
 	for _, configured := range g.upstreams.List() {
+		if !configured.Enabled {
+			continue
+		}
 		operation, err := g.profiles.Match(configured.ProfileID, method, requestPath)
 		if err == nil {
 			candidates = append(candidates, candidate{upstream: configured, operation: operation})
@@ -440,17 +459,21 @@ func (g *Gateway) resolveGenericRoute(r *http.Request) (upstream.Upstream, bool)
 	if _, err := profile.GenericMatch(r.Method, body); err != nil {
 		return upstream.Upstream{}, false
 	}
-	configured := g.upstreams.List()
-	if len(configured) == 0 {
-		return upstream.Upstream{}, false
+	for _, configured := range g.upstreams.List() {
+		if configured.Enabled {
+			return configured, true
+		}
 	}
-	return configured[0], true
+	return upstream.Upstream{}, false
 }
 
 func (g *Gateway) upstreamsByDomain(domain string) []upstream.Upstream {
 	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 	result := make([]upstream.Upstream, 0, 1)
 	for _, configured := range g.upstreams.List() {
+		if !configured.Enabled {
+			continue
+		}
 		parsed, err := url.Parse(configured.BaseURL)
 		if err != nil {
 			continue

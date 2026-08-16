@@ -808,3 +808,487 @@ main {
     border-right-color: #aebdcc;
   }
 }
+
+/* Gateway: flat desktop workbench with mode switching in the page header. */
+.gateway-page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 70px minmax(0, 1fr);
+  background: #f3f6f9;
+}
+
+.gateway-header {
+  min-width: 0;
+  gap: 24px;
+  padding: 0 22px;
+}
+
+.gateway-header__title {
+  min-width: 0;
+}
+
+.gateway-header__title p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gateway-tabs {
+  min-width: 0;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-self: stretch;
+  gap: 22px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.gateway-tabs > button {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  color: #667689;
+  background: transparent;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.gateway-tabs > button:hover {
+  color: #354e67;
+  background: transparent;
+}
+
+.gateway-tabs > button.active {
+  color: #234d73;
+  background: transparent;
+  box-shadow: none;
+}
+
+.gateway-tabs > button.active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: #2d668f;
+}
+
+.gateway-tabs > button.active svg {
+  color: #2d668f;
+}
+
+.gateway-tabs strong {
+  font-size: var(--font-caption);
+  font-weight: 640;
+}
+
+.gateway-tabs > button:focus-visible {
+  outline: 0;
+  text-decoration: underline;
+  text-decoration-color: #6f8eae;
+  text-underline-offset: 6px;
+}
+
+.gateway-stage {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gateway-workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+.gateway-endpoint {
+  min-height: 58px;
+  flex: 0 0 auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 1px solid #dce4ec;
+  border-radius: 0;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.gateway-endpoint__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.gateway-endpoint > div {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.gateway-endpoint > div > span {
+  flex: 0 0 auto;
+  color: #5f6f81;
+  font-size: var(--font-caption);
+  font-weight: 620;
+}
+
+.gateway-endpoint__status,
+.gateway-port {
+  font-size: var(--font-caption);
+}
+
+.gateway-endpoint > div > button {
+  gap: 8px;
+  padding: 0;
+}
+
+.gateway-endpoint code {
+  font-size: var(--font-body);
+}
+
+.gateway-endpoint aside {
+  min-width: 170px;
+}
+
+.gateway-split {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.gateway-split .list-pane {
+  grid-template-rows: 68px minmax(0, 1fr);
+}
+
+.gateway-split .pane-title {
+  padding-inline: 16px;
+}
+
+.gateway-split .service-list > button {
+  min-height: 84px;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.gateway-entity-list {
+  min-height: 0;
+  overflow: auto;
+}
+
+.gateway-entity-row {
+  position: relative;
+  min-height: 84px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-bottom: 1px solid #dfe6ed;
+  transition: background-color .14s;
+}
+
+.gateway-entity-row:hover {
+  background: #e9eef4;
+}
+
+.gateway-entity-row.selected {
+  background: #e1e9f2;
+}
+
+.gateway-entity-row.selected::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: #1f4268;
+}
+
+.gateway-entity-select {
+  min-width: 0;
+  align-self: stretch;
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px 10px 12px 16px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.gateway-entity-select > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.gateway-entity-select strong,
+.gateway-entity-select code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gateway-entity-select strong {
+  font-size: var(--font-body);
+}
+
+.gateway-entity-select code,
+.gateway-entity-select small {
+  font-size: var(--font-utility);
+}
+
+.gateway-entity-select code {
+  color: #4f6071;
+}
+
+.gateway-entity-select small {
+  color: var(--muted);
+}
+
+.gateway-entity-row > [role="switch"] {
+  margin-right: 16px;
+}
+
+.gateway-entity-row.disabled .gateway-entity-select {
+  opacity: .56;
+}
+
+.gateway-split .detail-header {
+  min-height: 104px;
+  padding: 18px 22px;
+}
+
+.gateway-split .detail-section {
+  padding: 20px 22px;
+}
+
+.gateway-split .detail-section > h3 {
+  margin-bottom: 12px;
+}
+
+.gateway-split .property-grid > div {
+  min-height: 52px;
+}
+
+.gateway-split .copy-field--labeled {
+  height: 50px;
+}
+
+.proxy-integrations {
+  flex: 0 0 auto;
+  border-bottom: 1px solid #dce4ec;
+  background: #fbfcfe;
+}
+
+.proxy-certificate-row {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e5eaf0;
+}
+
+.proxy-integration__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.proxy-integration__icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  color: #406887;
+  background: #eaf1f6;
+}
+
+.proxy-integration__identity > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.proxy-integration__identity strong,
+.proxy-env-action strong {
+  font-size: var(--font-body);
+}
+
+.proxy-integration__identity small,
+.proxy-env-action code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #778698;
+  font-size: var(--font-utility);
+}
+
+.proxy-certificate-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.proxy-tools-row {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 14px 8px 18px;
+}
+
+.proxy-env-action {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  border: 0;
+  color: #314d68;
+  background: transparent;
+  text-align: left;
+}
+
+.proxy-env-action:hover {
+  color: #1f4268;
+}
+
+.proxy-env-action > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.proxy-launch-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0;
+}
+
+.proxy-behavior p,
+.detail-empty p {
+  font-size: var(--font-caption);
+}
+
+@media (max-width: 900px) {
+  .gateway-header {
+    gap: 14px;
+    padding-inline: 16px;
+  }
+
+  .gateway-tabs > button {
+    padding-inline: 1px;
+  }
+}
+
+@media (max-width: 760px) {
+  .gateway-page {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .gateway-header__title p {
+    display: none;
+  }
+
+  .gateway-tabs > button {
+    height: 100%;
+    gap: 6px;
+    padding-inline: 0;
+  }
+
+  .gateway-stage {
+    overflow: auto;
+  }
+
+  .gateway-workspace {
+    height: auto;
+    min-height: 100%;
+    gap: 0;
+    padding: 0;
+  }
+
+  .gateway-endpoint {
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 10px 12px;
+  }
+
+  .gateway-endpoint aside {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  .gateway-split {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+  }
+
+  .gateway-split .list-pane {
+    max-height: 360px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .gateway-split .detail-pane {
+    overflow: visible;
+  }
+
+  .proxy-certificate-row {
+    align-items: flex-start;
+    gap: 14px;
+    padding-inline: 12px;
+  }
+
+  .proxy-certificate-actions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .proxy-tools-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .proxy-launch-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .gateway-header {
+    padding-inline: 12px;
+  }
+
+  .gateway-tabs > button strong {
+    font-size: 10px;
+  }
+}

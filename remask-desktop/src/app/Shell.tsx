@@ -1,4 +1,4 @@
-import { Activity, Bot, FileClock, FlaskConical, Gauge, ListChecks, LockKeyhole, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import { Activity, FileClock, FlaskConical, Gauge, ListChecks, LockKeyhole, Network, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -13,9 +13,9 @@ import { useApp } from "./AppContext";
 import { queryKeys, useCore } from "./useCore";
 import { Switch } from "../shared/ui/Switch";
 
-const icons = { overview: Gauge, logs: FileClock, test: FlaskConical, services: Bot, models: Activity, rules: ListChecks, settings: Settings };
+const icons = { overview: Gauge, logs: FileClock, test: FlaskConical, gateway: Network, models: Activity, rules: ListChecks, settings: Settings };
 type View = keyof typeof icons | "settings";
-const nav: View[] = ["overview", "logs", "test", "rules", "services", "models"];
+const nav: View[] = ["overview", "logs", "test", "rules", "gateway", "models"];
 function viewFromPath(pathname: string): View {
   const value = pathname.split("/")[1] as View | undefined;
   return value && (value in icons || value === "settings") ? value : "overview";
@@ -26,7 +26,7 @@ export function Shell() {
   const core = useCore(); const connected = core.status === "online";
   const protectedByCore = connected && Boolean(core.policy.data?.enabled);
   const [restarting, setRestarting] = useState(false);
-  const meta: Record<View, [string,string]> = { overview:[t("overviewTitle"),t("overviewSub")], logs:[t("logsTitle"),t("logsSub")], test:[t("testTitle"),t("testSub")], services:[t("servicesTitle"),t("servicesSub")], models:[t("modelsTitle"),t("modelsSub")], rules:[t("rulesTitle"),t("rulesSub")], settings:[t("settingsTitle"),t("settingsSub")] };
+  const meta: Record<View, [string,string]> = { overview:[t("overviewTitle"),t("overviewSub")], logs:[t("logsTitle"),t("logsSub")], test:[t("testTitle"),t("testSub")], gateway:[t("gatewayTitle"),t("gatewaySub")], models:[t("modelsTitle"),t("modelsSub")], rules:[t("rulesTitle"),t("rulesSub")], settings:[t("settingsTitle"),t("settingsSub")] };
   const protection=useMutation({mutationFn:(enabled:boolean)=>coreApi.savePolicy({...core.policy.data!,enabled}),onSuccess:saved=>queryClient.setQueryData(queryKeys.policy,saved),onError:error=>notify(String(error))});
   const startProtection = useMutation({
     mutationFn: async () => {
@@ -85,8 +85,8 @@ export function Shell() {
   const page = <Suspense fallback={null}><Outlet/></Suspense>;
   return <div className="window-shell">
     <header className="titlebar" data-tauri-drag-region onMouseDown={startWindowDrag}><div className="brand" data-tauri-drag-region><strong data-tauri-drag-region>Remask</strong></div><div className="titlebar-drag" data-tauri-drag-region/><div className={`topbar-protection ${protectedByCore?"topbar-protection--active":""} ${coreTransitioning?"topbar-protection--starting":""}`}><ShieldCheck className="topbar-protection__icon" size={13}/><span>{protectionLabel}</span><Switch ariaLabel={t("privacyProtectionControl")} disabled={coreTransitioning||protection.isPending} checked={protectedByCore} onCheckedChange={toggleProtection}/></div></header>
-    <div className="app-frame"><aside className="sidebar"><nav aria-label={t("overviewTitle")}>{nav.map((item) => { const Icon=icons[item]; const label=item==="rules"?t("rulesNav"):item==="test"?t("localTest"):t(item); return <button key={item} title={label} aria-label={label} aria-current={view===item?"page":undefined} className={`nav-item ${view===item?"nav-item--active":""}`} onClick={() => navigate(`/${item}`)}><Icon size={15}/><span>{label}</span></button>; })}</nav><div className="sidebar__bottom"><button title={t("settings")} aria-label={t("settings")} aria-current={view==="settings"?"page":undefined} className={`nav-item ${view==="settings"?"nav-item--active":""}`} onClick={()=>navigate("/settings")}><Settings size={15}/><span>{t("settings")}</span></button></div></aside>
-      <main className={view==="overview"?"main--headerless":""}>{view!=="overview"&&<header className="page-header"><div><h1>{meta[view][0]}</h1><p>{meta[view][1]}</p></div>{view==="test"?<span className="local-only-badge"><LockKeyhole size={11}/>{t("localOnly")}</span>:null}{view==="settings"&&<div className="page-header__actions"><Button variant="secondary" disabled={restarting} icon={<RefreshCw size={13}/>} onClick={restartCore}>{t(restarting ? "restarting" : "restart")}</Button></div>}</header>}<div className="page-content">{page}</div></main></div>
+    <div className="app-frame"><aside className="sidebar"><nav aria-label={t("overviewTitle")}>{nav.map((item) => { const Icon=icons[item]; const label=item==="rules"?t("rulesNav"):item==="test"?t("localTest"):item==="gateway"?t("gatewayNav"):t(item); return <button key={item} title={label} aria-label={label} aria-current={view===item?"page":undefined} className={`nav-item ${view===item?"nav-item--active":""}`} onClick={() => navigate(`/${item}`)}><Icon size={15}/><span>{label}</span></button>; })}</nav><div className="sidebar__bottom"><button title={t("settings")} aria-label={t("settings")} aria-current={view==="settings"?"page":undefined} className={`nav-item ${view==="settings"?"nav-item--active":""}`} onClick={()=>navigate("/settings")}><Settings size={15}/><span>{t("settings")}</span></button></div></aside>
+      <main className={view==="overview"||view==="gateway"?"main--headerless":""}>{view!=="overview"&&view!=="gateway"&&<header className="page-header"><div><h1>{meta[view][0]}</h1><p>{meta[view][1]}</p></div>{view==="test"?<span className="local-only-badge"><LockKeyhole size={11}/>{t("localOnly")}</span>:null}{view==="settings"&&<div className="page-header__actions"><Button variant="secondary" disabled={restarting} icon={<RefreshCw size={13}/>} onClick={restartCore}>{t(restarting ? "restarting" : "restart")}</Button></div>}</header>}<div className="page-content">{page}</div></main></div>
     <footer className="statusbar"><span className={core.status === "starting" ? "core-status--starting" : undefined}><StatusDot tone={connected?"success":core.status==="starting"?"warning":"muted"}/>{core.status==="starting"?t("coreStarting"):connected?t("coreOnline"):t("coreOffline")}</span><span className="spacer"/><span><code>remask-core</code> {connected?core.version.data?.version||"—":"—"}</span></footer><Toast message={toast}/>
   </div>;
 }

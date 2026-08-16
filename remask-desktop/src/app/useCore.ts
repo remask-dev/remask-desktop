@@ -15,6 +15,7 @@ export const queryKeys = {
   proxyCA: ["core", "proxy-ca"] as const,
   profiles: ["core", "profiles"] as const,
   upstreams: ["core", "upstreams"] as const,
+  proxyRules: ["core", "proxy-rules"] as const,
   models: ["core", "models"] as const,
   activeModel: ["core", "models", "active"] as const,
   settings: ["core", "settings"] as const,
@@ -100,7 +101,8 @@ export function useOverviewData(range: AuditStatsRange) {
   const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online, initialData: emptyPolicy, initialDataUpdatedAt: 0 });
   const activeModel = useQuery({ queryKey: queryKeys.activeModel, queryFn: coreApi.activeModel, enabled: online, initialData: null, initialDataUpdatedAt: 0 });
   const upstreams = useQuery({ queryKey: queryKeys.upstreams, queryFn: coreApi.upstreams, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
-  return combineQueries({ stats, policy, activeModel, upstreams });
+  const proxyRules = useQuery({ queryKey: queryKeys.proxyRules, queryFn: coreApi.proxyRules, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
+  return combineQueries({ stats, policy, activeModel, upstreams, proxyRules });
 }
 
 export function useLogsData(query = "") {
@@ -113,12 +115,13 @@ export function useLogDetailData(id: string) {
   return useQuery({ queryKey: queryKeys.log(id), queryFn: () => coreApi.log(id), enabled: online && Boolean(id), staleTime: Infinity });
 }
 
-export function useServicesData() {
+export function useGatewayData() {
   const online = useCoreOnline();
   const upstreams = useQuery({ queryKey: queryKeys.upstreams, queryFn: coreApi.upstreams, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
   const profiles = useQuery({ queryKey: queryKeys.profiles, queryFn: coreApi.profiles, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
   const proxyCA = useQuery({ queryKey: queryKeys.proxyCA, queryFn: coreApi.proxyCA, enabled: online, initialData: emptyProxyCA, initialDataUpdatedAt: 0 });
-  return combineQueries({ upstreams, profiles, proxyCA });
+  const proxyRules = useQuery({ queryKey: queryKeys.proxyRules, queryFn: coreApi.proxyRules, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
+  return combineQueries({ upstreams, profiles, proxyCA, proxyRules });
 }
 
 export function useModelsData() {
@@ -139,9 +142,7 @@ export function useSettingsData() {
   const online = useCoreOnline();
   const settings = useQuery({ queryKey: queryKeys.settings, queryFn: coreApi.settings, enabled: online, initialData: emptySettings, initialDataUpdatedAt: 0 });
   const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online, initialData: emptyPolicy, initialDataUpdatedAt: 0 });
-  const upstreams = useQuery({ queryKey: queryKeys.upstreams, queryFn: coreApi.upstreams, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
-  const proxyCA = useQuery({ queryKey: queryKeys.proxyCA, queryFn: coreApi.proxyCA, enabled: online, initialData: emptyProxyCA, initialDataUpdatedAt: 0 });
-  return combineQueries({ settings, policy, upstreams, proxyCA });
+  return combineQueries({ settings, policy });
 }
 
 type QueryResult = { isPending: boolean; error: unknown; isError: boolean; refetch: () => Promise<unknown> };

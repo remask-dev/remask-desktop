@@ -16,7 +16,7 @@ import (
 
 	"github.com/remask/remask-core/internal/gateway"
 	"github.com/remask/remask-core/internal/mitm"
-	"github.com/remask/remask-core/internal/upstream"
+	"github.com/remask/remask-core/internal/proxyrule"
 )
 
 const connectTimeout = 15 * time.Second
@@ -26,18 +26,18 @@ const connectTimeout = 15 * time.Second
 // tunnels and never receive a Remask-issued certificate.
 type Proxy struct {
 	logger    *log.Logger
-	upstreams *upstream.Registry
+	rules     *proxyrule.Registry
 	gateway   *gateway.Gateway
 	authority *mitm.Authority
 	transport *http.Transport
 	dialer    net.Dialer
 }
 
-func New(logger *log.Logger, upstreams *upstream.Registry, gateway *gateway.Gateway, authority *mitm.Authority) *Proxy {
+func New(logger *log.Logger, rules *proxyrule.Registry, gateway *gateway.Gateway, authority *mitm.Authority) *Proxy {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	return &Proxy{
-		logger: logger, upstreams: upstreams, gateway: gateway, authority: authority,
+		logger: logger, rules: rules, gateway: gateway, authority: authority,
 		transport: transport,
 		dialer:    net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second},
 	}
@@ -51,13 +51,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	configured, ok := p.upstreams.FindByAuthority(requestAuthority(r))
+	rule, ok := p.rules.MatchAuthority(requestRuleAuthority(r))
 	if ok {
+		targetBaseURL := requestTargetBaseURL(r, "http")
 		if isUpgrade(r) {
-			p.reverseUnmodified(w, r, configured.BaseURL)
+			p.reverseUnmodified(w, r, targetBaseURL)
 			return
 		}
-		p.gateway.ServeUpstreamHTTP(w, r, configured)
+		p.gateway.ServeProxyHTTP(w, r, rule.ID, rule.ProfileID, targetBaseURL)
 		return
 	}
 	if isUpgrade(r) {
@@ -69,12 +70,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 	authority := connectAuthority(r.Host)
-	configured, inspect := p.upstreams.FindByAuthority(authority)
+	rule, inspect := p.rules.MatchAuthority(authority)
 	if !inspect {
 		p.tunnel(w, r, authority)
 		return
 	}
-	p.inspectTLS(w, r, authority, configured)
+	p.inspectTLS(w, r, authority, rule)
 }
 
 func (p *Proxy) tunnel(w http.ResponseWriter, r *http.Request, authority string) {
@@ -97,7 +98,7 @@ func (p *Proxy) tunnel(w http.ResponseWriter, r *http.Request, authority string)
 	splice(client, upstreamConn)
 }
 
-func (p *Proxy) inspectTLS(w http.ResponseWriter, r *http.Request, authority string, configured upstream.Upstream) {
+func (p *Proxy) inspectTLS(w http.ResponseWriter, r *http.Request, authority string, rule proxyrule.Rule) {
 	host := authorityHostname(authority)
 	certificate, err := p.authority.CertificateFor(host)
 	if err != nil {
@@ -136,15 +137,29 @@ func (p *Proxy) inspectTLS(w http.ResponseWriter, r *http.Request, authority str
 				return
 			}
 			if isUpgrade(request) {
-				p.reverseUnmodified(response, request, configured.BaseURL)
+				p.reverseUnmodified(response, request, "https://"+authority)
 				return
 			}
-			p.gateway.ServeUpstreamHTTP(response, request, configured)
+			p.gateway.ServeProxyHTTP(response, request, rule.ID, rule.ProfileID, "https://"+authority)
 		}),
 	}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 		p.logger.Printf("forward_proxy_tls_server_failed host=%s error=%v", host, err)
 	}
+}
+
+func requestTargetBaseURL(r *http.Request, fallbackScheme string) string {
+	scheme := fallbackScheme
+	host := r.Host
+	if r.URL != nil {
+		if r.URL.Scheme != "" {
+			scheme = r.URL.Scheme
+		}
+		if r.URL.Host != "" {
+			host = r.URL.Host
+		}
+	}
+	return scheme + "://" + host
 }
 
 func (p *Proxy) reverseUnmodified(w http.ResponseWriter, r *http.Request, baseURL string) {
@@ -207,6 +222,19 @@ func requestAuthority(r *http.Request) string {
 		return r.URL.Host
 	}
 	return r.Host
+}
+
+func requestRuleAuthority(r *http.Request) string {
+	authority := requestAuthority(r)
+	parsed, err := url.Parse("//" + authority)
+	if err != nil || parsed.Hostname() == "" || parsed.Port() != "" {
+		return authority
+	}
+	port := "80"
+	if r.URL != nil && strings.EqualFold(r.URL.Scheme, "https") {
+		port = "443"
+	}
+	return net.JoinHostPort(parsed.Hostname(), port)
 }
 
 func (p *Proxy) logRequest(r *http.Request) {

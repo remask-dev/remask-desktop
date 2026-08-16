@@ -23,6 +23,55 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 
 struct CoreProcess(Mutex<Option<ManagedCoreProcess>>);
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct GatewayAddresses {
+    api_gateway: String,
+    http_proxy: String,
+}
+
+impl Default for GatewayAddresses {
+    fn default() -> Self {
+        Self {
+            api_gateway: "127.0.0.1:17681".to_string(),
+            http_proxy: "127.0.0.1:17682".to_string(),
+        }
+    }
+}
+
+fn gateway_addresses_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
+    Ok(home_dir.join(".remask").join("desktop_gateway.json"))
+}
+
+fn load_gateway_addresses(app: &AppHandle) -> GatewayAddresses {
+    let Ok(path) = gateway_addresses_path(app) else {
+        return GatewayAddresses::default();
+    };
+    std::fs::read(path)
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
+}
+
+fn save_gateway_addresses(
+    app: &AppHandle,
+    api_gateway: &str,
+    http_proxy: &str,
+) -> Result<(), String> {
+    let path = gateway_addresses_path(app)?;
+    if let Some(directory) = path.parent() {
+        std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    }
+    let data = serde_json::to_vec_pretty(&GatewayAddresses {
+        api_gateway: api_gateway.to_string(),
+        http_proxy: http_proxy.to_string(),
+    })
+    .map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, data).map_err(|error| error.to_string())?;
+    std::fs::rename(temporary, path).map_err(|error| error.to_string())
+}
+
 struct ManagedCoreProcess {
     child: CommandChild,
     #[cfg(target_os = "windows")]
@@ -173,7 +222,8 @@ fn start_core(
         &address,
         &proxy_address,
         &forward_proxy_address,
-    )
+    )?;
+    save_gateway_addresses(&app, &proxy_address, &forward_proxy_address)
 }
 
 fn spawn_core(
@@ -388,7 +438,8 @@ fn restart_core(
         &address,
         &proxy_address,
         &forward_proxy_address,
-    )
+    )?;
+    save_gateway_addresses(&app, &proxy_address, &forward_proxy_address)
 }
 
 #[tauri::command]
@@ -501,13 +552,14 @@ pub fn run() {
             // first launch. Do it off the setup thread so the webview can
             // render the complete client immediately, independently of Core.
             let app_handle = app.handle().clone();
+            let gateway_addresses = load_gateway_addresses(&app_handle);
             tauri::async_runtime::spawn_blocking(move || {
                 if let Err(error) = spawn_core(
                     &app_handle,
                     app_handle.state::<CoreProcess>().inner(),
                     "127.0.0.1:17680",
-                    "127.0.0.1:17681",
-                    "127.0.0.1:17682",
+                    &gateway_addresses.api_gateway,
+                    &gateway_addresses.http_proxy,
                 ) {
                     eprintln!("failed to start remask-core: {error}");
                 }

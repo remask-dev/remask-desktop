@@ -19,7 +19,7 @@ export function Overview() {
   const stats = statsQuery.stats;
   const max = Math.max(1, ...stats.daily.flatMap((item) => [item.entities, item.requests]));
   const ruleCount = t("ruleCount").replace("{count}", statsQuery.policy.rules.length.toLocaleString(dateLocale));
-  const gatewayProviderCount = t("gatewayProviderCount").replace("{count}", statsQuery.upstreams.length.toLocaleString(dateLocale));
+  const gatewayProviderCount = `${t("gatewayProviderCount").replace("{count}", statsQuery.upstreams.length.toLocaleString(dateLocale))} · ${t("proxyTargetCount").replace("{count}", statsQuery.proxyRules.length.toLocaleString(dateLocale))}`;
   const tpm = Math.round(stats.tokens_per_minute).toLocaleString(dateLocale);
   const cacheHitRate = stats.token_total > 0 ? Math.round((stats.token_cached / stats.token_total) * 100) : 0;
   const rangeOptions = [

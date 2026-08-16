@@ -658,6 +658,23 @@ func TestUnconfiguredUpstreamStillReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestDisabledUpstreamIsUnavailableToGateway(t *testing.T) {
+	handler := testHandler(t)
+	configure := httptest.NewRequest(http.MethodPost, "/api/v1/upstreams", strings.NewReader(`{"id":"disabled","base_url":"https://disabled.example","profile_id":"openai","credential_mode":"passthrough","enabled":false}`))
+	configure.Header.Set("Content-Type", "application/json")
+	configured := httptest.NewRecorder()
+	handler.ServeHTTP(configured, configure)
+	if configured.Code != http.StatusCreated || !strings.Contains(configured.Body.String(), `"enabled":false`) {
+		t.Fatalf("configure disabled upstream = %d %s", configured.Code, configured.Body.String())
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/proxy/disabled/v1/models", nil))
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "UPSTREAM_DISABLED") {
+		t.Fatalf("disabled upstream response = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestProxyResolvesConfiguredServiceByDomain(t *testing.T) {
 	var receivedPath string
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
