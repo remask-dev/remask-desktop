@@ -9,7 +9,11 @@
     "typecheck": "tsc -b --pretty false",
     "stage:core": "bash scripts/stage-core.sh",
     "desktop:dev": "npm run stage:core && tauri dev --no-watch",
-    "desktop:build": "npm run stage:core && tauri build",
+    "desktop:build": "bash scripts/package.sh current",
+    "package:current": "bash scripts/package.sh current",
+    "package:macos": "bash scripts/package.sh macos",
+    "package:windows": "bash scripts/package.sh windows",
+    "package:linux": "bash scripts/package.sh linux",
     "icons": "bash scripts/generate-icons.sh",
     "tauri": "tauri"
   },

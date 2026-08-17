@@ -39,6 +39,19 @@ pub fn install_certificate(app: &AppHandle) -> Result<CertificateTrustStatus, St
     Ok(status)
 }
 
+pub fn uninstall_certificate(app: &AppHandle) -> Result<CertificateTrustStatus, String> {
+    let path = certificate_path(app)?;
+    validate_certificate(&path)?;
+    platform_uninstall_certificate(&path)?;
+    let status = platform_certificate_status(&path)?;
+    if status.supported && status.installed {
+        return Err(
+            "the certificate uninstaller completed, but the Remask CA is still trusted".into(),
+        );
+    }
+    Ok(status)
+}
+
 pub fn launch_client(
     app: &AppHandle,
     client: &str,
@@ -459,6 +472,21 @@ fn platform_install_certificate(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+fn platform_uninstall_certificate(path: &Path) -> Result<(), String> {
+    let fingerprint = certificate_fingerprint(path)?;
+    let keychain = macos_login_keychain(path)?;
+    let output = Command::new("/usr/bin/security")
+        .args(["delete-certificate", "-Z", &fingerprint, "-t"])
+        .arg(keychain)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(command_error("uninstall system certificate", &output));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn macos_login_keychain(certificate: &Path) -> Result<PathBuf, String> {
     let home_dir = certificate
         .ancestors()
@@ -575,6 +603,22 @@ fn platform_install_certificate(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+fn platform_uninstall_certificate(path: &Path) -> Result<(), String> {
+    // Resolve the exact certificate thumbprint from the local PEM file so a
+    // similarly named certificate in the user's Root store is never removed.
+    let script = r#"$certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($env:REMASK_CERTIFICATE_PATH); $storePath = Join-Path 'Cert:\CurrentUser\Root' $certificate.Thumbprint; if (Test-Path -LiteralPath $storePath) { Remove-Item -LiteralPath $storePath -Force }"#;
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("REMASK_CERTIFICATE_PATH", path)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(command_error("uninstall Windows certificate", &output));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 fn platform_launch_client(
     executable: &str,
     proxy_url: &str,
@@ -647,6 +691,33 @@ fn platform_install_certificate(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
+fn platform_uninstall_certificate(_path: &Path) -> Result<(), String> {
+    if !Path::new("/usr/sbin/update-ca-certificates").is_file()
+        || !Path::new("/usr/bin/pkexec").is_file()
+    {
+        return Err(
+            "system certificate uninstallation requires pkexec and update-ca-certificates".into(),
+        );
+    }
+    let target = "/usr/local/share/ca-certificates/remask-local-privacy-proxy.crt";
+    let remove = Command::new("/usr/bin/pkexec")
+        .args(["/usr/bin/rm", "-f", "--", target])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !remove.status.success() {
+        return Err(command_error("remove system certificate", &remove));
+    }
+    let update = Command::new("/usr/bin/pkexec")
+        .arg("/usr/sbin/update-ca-certificates")
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !update.status.success() {
+        return Err(command_error("update system certificates", &update));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn platform_launch_client(
     executable: &str,
     proxy_url: &str,
@@ -695,6 +766,11 @@ fn platform_certificate_status(_path: &Path) -> Result<CertificateTrustStatus, S
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn platform_install_certificate(_path: &Path) -> Result<(), String> {
     Err("system certificate installation is not supported on this platform".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn platform_uninstall_certificate(_path: &Path) -> Result<(), String> {
+    Err("system certificate uninstallation is not supported on this platform".into())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]

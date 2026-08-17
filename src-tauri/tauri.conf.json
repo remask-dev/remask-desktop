@@ -36,6 +36,6 @@
       "icons/icon.png"
     ],
     "externalBin": ["binaries/remask-core"],
-    "resources": ["resources/model-bundle.json", "resources/models/**/*", "resources/onnxruntime/**/*"]
+    "resources": ["resources/models/**/*", "resources/onnxruntime/**/*"]
   }
 }
