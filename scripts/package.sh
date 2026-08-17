@@ -6,6 +6,14 @@ desktop_dir="$(cd "$script_dir/.." && pwd)"
 workspace_dir="$(cd "$desktop_dir/.." && pwd)"
 tauri_dir="$desktop_dir/src-tauri"
 artifacts_dir="$workspace_dir/artifacts"
+packaging_lock="$script_dir/packaging.lock.json"
+windows_runtime_stage_dir="$tauri_dir/resources/windows-runtime"
+windows_vc_runtime_files=(
+  msvcp140.dll
+  msvcp140_1.dll
+  vcruntime140.dll
+  vcruntime140_1.dll
+)
 
 log() {
   printf '[package] %s\n' "$*"
@@ -18,6 +26,16 @@ die() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+lock_value() {
+  node -e '
+    const lock = require(process.argv[1]);
+    let value = lock;
+    for (const key of process.argv[2].split(".")) value = value?.[key];
+    if (value === undefined || value === null) process.exit(2);
+    process.stdout.write(String(value));
+  ' "$packaging_lock" "$1"
 }
 
 normalize_arch() {
@@ -46,8 +64,10 @@ ensure_rust_target() {
 
 resolve_runtime_library() {
   local platform="$1"
+  local arch="$2"
   local runtime="${REMASK_ONNXRUNTIME_LIBRARY:-}"
-  local filename variable_name
+  local filename variable_name target_key locked_path locked_sha256 expected_sha256
+  local cache_dir archive package_url package_sha256 extract_dir native_dir
 
   case "$platform" in
     macos)
@@ -68,12 +88,49 @@ resolve_runtime_library() {
     *) die "unsupported runtime platform: $platform" ;;
   esac
 
-  if [[ -z "$runtime" && -f "$tauri_dir/resources/onnxruntime/$filename" ]]; then
-    runtime="$tauri_dir/resources/onnxruntime/$filename"
+  target_key="$platform-$arch"
+  locked_path="$(lock_value "onnxRuntime.targets.$target_key.path" 2>/dev/null || true)"
+  locked_sha256="$(lock_value "onnxRuntime.targets.$target_key.sha256" 2>/dev/null || true)"
+
+  if [[ -n "$runtime" ]]; then
+    [[ -f "$runtime" ]] || die "ONNX Runtime library not found: $runtime"
+    expected_sha256="${REMASK_ONNXRUNTIME_SHA256:-$locked_sha256}"
+    [[ -n "$expected_sha256" ]] || die "set REMASK_ONNXRUNTIME_SHA256 for custom $platform/$arch runtime"
+    resolved_runtime_library="$runtime"
+    resolved_runtime_sha256="$expected_sha256"
+    return
   fi
-  [[ -n "$runtime" ]] || die "set $variable_name or REMASK_ONNXRUNTIME_LIBRARY"
-  [[ -f "$runtime" ]] || die "ONNX Runtime library not found: $runtime"
-  printf '%s\n' "$runtime"
+
+  [[ -n "$locked_path" && -n "$locked_sha256" ]] || die "no locked ONNX Runtime for $platform/$arch; set $variable_name and REMASK_ONNXRUNTIME_SHA256"
+  require_command curl
+  require_command unzip
+  package_url="$(lock_value onnxRuntime.package.url)"
+  package_sha256="$(lock_value onnxRuntime.package.sha256)"
+  cache_dir="${REMASK_PACKAGE_CACHE_DIR:-$desktop_dir/.cache}/onnxruntime-$(lock_value onnxRuntime.version)"
+  archive="$cache_dir/microsoft.ml.onnxruntime.nupkg"
+  extract_dir="$cache_dir/extracted"
+  mkdir -p "$cache_dir"
+  if [[ ! -f "$archive" || "$(sha256_file "$archive" | awk '{print $1}')" != "$package_sha256" ]]; then
+    log "downloading locked ONNX Runtime $(lock_value onnxRuntime.version)"
+    curl -fL --retry 3 -o "$archive.part" "$package_url"
+    if [[ "$(sha256_file "$archive.part" | awk '{print $1}')" != "$package_sha256" ]]; then
+      rm -f "$archive.part"
+      die "ONNX Runtime package checksum mismatch"
+    fi
+    mv "$archive.part" "$archive"
+  fi
+  runtime="$extract_dir/$locked_path"
+  if [[ ! -f "$runtime" || "$(sha256_file "$runtime" | awk '{print $1}')" != "$locked_sha256" ]]; then
+    native_dir="$(dirname "$locked_path")"
+    rm -rf "$extract_dir.stage"
+    mkdir -p "$extract_dir.stage"
+    unzip -q "$archive" "$native_dir/*" -d "$extract_dir.stage"
+    rm -rf "$extract_dir"
+    mv "$extract_dir.stage" "$extract_dir"
+  fi
+  [[ -f "$runtime" ]] || die "locked ONNX Runtime was not extracted: $runtime"
+  resolved_runtime_library="$runtime"
+  resolved_runtime_sha256="$locked_sha256"
 }
 
 configure_windows_cross_toolchain() {
@@ -108,13 +165,76 @@ configure_windows_cross_toolchain() {
   require_command makensis
 }
 
+stage_windows_vc_runtime() {
+  local arch="$1"
+  local runtime_source="${REMASK_WINDOWS_VC_RUNTIME_DIR:-}"
+  local cache_dir archive archive_sha256 download_url candidate filename
+  local -a candidates=()
+
+  if [[ -z "$runtime_source" && -n "${VCToolsRedistDir:-}" ]]; then
+    candidates+=(
+      "$VCToolsRedistDir/$arch/Microsoft.VC143.CRT"
+      "$VCToolsRedistDir/$arch/Microsoft.VC142.CRT"
+    )
+  fi
+  if [[ -z "$runtime_source" ]]; then
+    if ((${#candidates[@]} > 0)); then
+      for candidate in "${candidates[@]}"; do
+        if [[ -f "$candidate/msvcp140.dll" && -f "$candidate/vcruntime140.dll" ]]; then
+          runtime_source="$candidate"
+          break
+        fi
+      done
+    fi
+  fi
+
+  if [[ -z "$runtime_source" ]]; then
+    [[ "$arch" == "x64" ]] || die "set REMASK_WINDOWS_VC_RUNTIME_DIR for Windows $arch packaging"
+    require_command curl
+    require_command unzip
+    cache_dir="${REMASK_PACKAGE_CACHE_DIR:-$desktop_dir/.cache}/windows-vclibs-x64-14.00-desktop"
+    archive="$cache_dir/Microsoft.VCLibs.x64.14.00.Desktop.appx"
+    archive_sha256="$(lock_value windowsVCLibs.x64.sha256)"
+    download_url="$(lock_value windowsVCLibs.x64.url)"
+    mkdir -p "$cache_dir"
+    if [[ ! -f "$archive" || "$(sha256_file "$archive" | awk '{print $1}')" != "$archive_sha256" ]]; then
+      log "downloading Microsoft Visual C++ x64 runtime"
+      curl -fL --retry 3 -o "$archive.part" "$download_url"
+      if [[ "$(sha256_file "$archive.part" | awk '{print $1}')" != "$archive_sha256" ]]; then
+        rm -f "$archive.part"
+        die "Microsoft Visual C++ runtime checksum mismatch"
+      fi
+      mv "$archive.part" "$archive"
+    fi
+    runtime_source="$cache_dir/files"
+    if [[ ! -f "$runtime_source/msvcp140.dll" || ! -f "$runtime_source/vcruntime140_1.dll" ]]; then
+      rm -rf "$runtime_source.stage"
+      mkdir -p "$runtime_source.stage"
+      unzip -q -j "$archive" "${windows_vc_runtime_files[@]}" -d "$runtime_source.stage"
+      rm -rf "$runtime_source"
+      mv "$runtime_source.stage" "$runtime_source"
+    fi
+  fi
+
+  rm -rf "$windows_runtime_stage_dir"
+  mkdir -p "$windows_runtime_stage_dir"
+  for filename in "${windows_vc_runtime_files[@]}"; do
+    [[ -f "$runtime_source/$filename" ]] || die "Windows VC++ runtime not found: $runtime_source/$filename"
+    cp "$runtime_source/$filename" "$windows_runtime_stage_dir/$filename"
+  done
+  log "staged Microsoft Visual C++ runtime"
+}
+
 verify_windows_runtime_dependencies() {
   local target="$1"
   local executable="$tauri_dir/target/$target/release/remask-desktop.exe"
   local loader="$tauri_dir/target/$target/release/WebView2Loader.dll"
-  local dependencies
+  local dependencies filename
 
   [[ -f "$executable" ]] || die "Windows executable not found: $executable"
+  for filename in "${windows_vc_runtime_files[@]}"; do
+    [[ -f "$windows_runtime_stage_dir/$filename" ]] || die "Windows VC++ runtime was not staged: $filename"
+  done
   if [[ "$target" != "x86_64-pc-windows-gnullvm" ]]; then
     return
   fi
@@ -191,6 +311,7 @@ require_command node
 require_command npm
 require_command rustc
 require_command rustup
+[[ -f "$packaging_lock" ]] || die "packaging lock not found: $packaging_lock"
 [[ -x "$desktop_dir/node_modules/.bin/tauri" ]] || die "desktop dependencies are missing; run npm ci"
 
 host_platform="$(detect_host_platform)"
@@ -240,17 +361,29 @@ fi
 if [[ "$platform" == "linux" && "$host_platform" != "linux" ]]; then
   die "Linux packages must be built on Linux or a Linux CI runner"
 fi
+if [[ "${REMASK_RELEASE:-0}" == "1" && "$platform" != "$host_platform" ]]; then
+  die "release packages must be built and smoke-tested on their native platform"
+fi
 if [[ "$platform" == "$host_platform" && "$arch" != "$host_arch" && -z "${REMASK_GO_CC:-}" ]]; then
   die "cross-architecture Core builds require REMASK_GO_CC for $arch"
 fi
 
 ensure_rust_target "$target"
-runtime_library="$(resolve_runtime_library "$platform")"
+resolve_runtime_library "$platform" "$arch"
+runtime_library="$resolved_runtime_library"
+model_ids="${REMASK_MODEL_IDS:-openai-privacy-filter-q4f16}"
+node "$script_dir/verify-packaging-inputs.mjs" \
+  "$packaging_lock" "$runtime_library" "$resolved_runtime_sha256" \
+  "$workspace_dir/remask-core/models" "$model_ids"
 
 log "platform=$platform arch=$arch target=$target bundles=$bundles"
+if [[ "$platform" == "windows" ]]; then
+  stage_windows_vc_runtime "$arch"
+fi
 log "staging Core, models, and ONNX Runtime"
 TARGET_TRIPLE="$target" \
 REMASK_ONNXRUNTIME_LIBRARY="$runtime_library" \
+REMASK_MODEL_IDS="$model_ids" \
 bash "$script_dir/stage-core.sh"
 
 tauri_args=(build --target "$target" --bundles "$bundles")
@@ -258,11 +391,15 @@ if [[ "${REMASK_SIGN:-0}" != "1" ]]; then
   tauri_args+=(--no-sign)
 fi
 
-# LLVM-MinGW's WebView2 import loader is a runtime DLL. Tauri resources are
-# normally installed below resources/, but Windows resolves this DLL beside
-# the application executable, so map it to the installation root.
-if [[ "$target" == "x86_64-pc-windows-gnullvm" ]]; then
-  windows_runtime_config="{\"bundle\":{\"resources\":{\"resources/models/**/*\":\"resources/models/\",\"resources/onnxruntime/**/*\":\"resources/onnxruntime/\",\"target/$target/release/WebView2Loader.dll\":\"\"}}}"
+# Windows resolves the WebView2 loader and ONNX Runtime's VC++ dependencies
+# beside the application executable. Map those DLLs to the installation root
+# instead of Tauri's normal resources/ directory.
+if [[ "$platform" == "windows" ]]; then
+  windows_resource_map="\"resources/models/**/*\":\"resources/models/\",\"resources/onnxruntime/**/*\":\"resources/onnxruntime/\",\"resources/windows-runtime/*.dll\":\"\""
+  if [[ "$target" == "x86_64-pc-windows-gnullvm" ]]; then
+    windows_resource_map+=",\"target/$target/release/WebView2Loader.dll\":\"\""
+  fi
+  windows_runtime_config="{\"bundle\":{\"resources\":{$windows_resource_map}}}"
   tauri_args+=(--config "$windows_runtime_config")
 fi
 
