@@ -274,6 +274,9 @@ func downloadFile(ctx context.Context, client *http.Client, url, destination, to
 
 func listRepoFiles(ctx context.Context, cfg Config) (map[string]bool, string, error) {
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/api/models/" + strings.Trim(cfg.Repo, "/")
+	if cfg.Revision != "" && cfg.Revision != "main" {
+		endpoint += "/revision/" + url.PathEscape(cfg.Revision)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, "", err

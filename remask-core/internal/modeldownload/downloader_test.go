@@ -39,6 +39,31 @@ func TestSelectFilesPreservesExternalDataBasename(t *testing.T) {
 	t.Fatal("selectFiles did not return an external data file")
 }
 
+func TestValidateRepoUsesPinnedRevisionEndpoint(t *testing.T) {
+	const revision = "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/api/models/example/pii/revision/"+revision {
+			t.Fatalf("repository metadata path = %q", request.URL.Path)
+		}
+		body := `{"sha":"` + revision + `","siblings":[{"rfilename":"onnx/model.onnx"},{"rfilename":"tokenizer.json"}]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     http.StatusText(http.StatusOK),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    request,
+		}, nil
+	})}
+
+	err := ValidateRepo(context.Background(), Config{
+		Root: t.TempDir(), ID: "example-pii", Repo: "example/pii", Revision: revision,
+		BaseURL: "https://models.example", HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDownloadDoesNotInferTokenTypeIDsFromArchitectureConfig(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		status := http.StatusOK

@@ -40,6 +40,23 @@ func TestExtractTokenUsageFromSSE(t *testing.T) {
 	}
 }
 
+func TestExtractAnthropicCacheUsageNormalizesInput(t *testing.T) {
+	body := `{"message":{"usage":{"input_tokens":7,"cache_creation_input_tokens":3,"cache_read_input_tokens":100,"output_tokens":5}}}`
+	usage := extractTokenUsage([]byte(body))
+	if usage.Input != 110 || usage.Output != 5 || usage.Total != 115 || usage.Cached != 100 {
+		t.Fatalf("Anthropic usage = %#v", usage)
+	}
+}
+
+func TestExtractAnthropicStreamingUsageMergesInputAndOutput(t *testing.T) {
+	body := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7,\"cache_read_input_tokens\":100}}}\n\n" +
+		"data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n"
+	usage := extractTokenUsage([]byte(body))
+	if usage.Input != 107 || usage.Output != 5 || usage.Total != 112 || usage.Cached != 100 {
+		t.Fatalf("Anthropic streaming usage = %#v", usage)
+	}
+}
+
 func TestExtractRequestModel(t *testing.T) {
 	if got := extractModelFromBody([]byte(`{"model":"gpt-4.1","messages":[]}`)); got != "gpt-4.1" {
 		t.Fatalf("body model = %q", got)

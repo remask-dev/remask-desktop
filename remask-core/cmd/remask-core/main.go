@@ -30,6 +30,7 @@ func main() {
 	onnxProvider := flag.String("onnx-provider", envOr("REMASK_ONNX_PROVIDER", "auto"), "ONNX execution provider: auto, cpu, coreml, cuda, directml, tensorrt, rocm, or openvino")
 	onnxDevice := flag.Int("onnx-device", envInt("REMASK_ONNX_DEVICE", 0), "GPU device index for the ONNX execution provider")
 	dataDir := flag.String("data-dir", os.Getenv("REMASK_DATA_DIR"), "directory for settings, upstreams, and masked audit logs")
+	selfTest := flag.Bool("self-test", false, "initialize the runtime and active model, then exit")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "remask-core ", log.LstdFlags|log.LUTC)
@@ -58,6 +59,10 @@ func main() {
 	if err != nil {
 		logger.Printf("initialize application: %v", err)
 		os.Exit(1)
+	}
+	if *selfTest {
+		logger.Printf("self-test passed runtime=%s active_model=%s", runtime.Name(), *activeModel)
+		return
 	}
 
 	server := &http.Server{

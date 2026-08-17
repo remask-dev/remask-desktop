@@ -1,0 +1,83 @@
+name: Package Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: remask-desktop/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.4
+          cache-dependency-path: remask-core/go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            remask-core/models
+            remask-desktop/.cache
+          key: windows-package-inputs-${{ hashFiles('remask-desktop/scripts/packaging.lock.json') }}
+
+      - name: Install desktop dependencies
+        working-directory: remask-desktop
+        run: npm ci
+
+      - name: Download locked model
+        shell: bash
+        working-directory: remask-core
+        run: |
+          if ! node ../remask-desktop/scripts/verify-packaging-inputs.mjs \
+            ../remask-desktop/scripts/packaging.lock.json - - models \
+            openai-privacy-filter-q4f16; then
+            rm -rf models/openai-privacy-filter-q4f16
+            go run ./cmd/remask-model-downloader \
+              -repo openai/privacy-filter \
+              -revision 7ffa9a043d54d1be65afb281eddf0ffbe629385b \
+              -variant q4f16 \
+              -id openai-privacy-filter-q4f16 \
+              -name "OpenAI Privacy Filter Q4F16" \
+              -output models
+          fi
+          node ../remask-desktop/scripts/verify-packaging-inputs.mjs \
+            ../remask-desktop/scripts/packaging.lock.json - - models \
+            openai-privacy-filter-q4f16
+
+      - name: Build native Windows installer
+        shell: bash
+        working-directory: remask-desktop
+        env:
+          REMASK_GO_CC: C:/msys64/mingw64/bin/gcc.exe
+          REMASK_RELEASE: "1"
+        run: npm run package:windows
+
+      - name: Install and run Windows smoke test
+        shell: powershell
+        run: |
+          $installer = Get-ChildItem ./artifacts/windows/x64/*/*-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer artifact was not found" }
+          ./remask-desktop/scripts/smoke-windows.ps1 `
+            -InstallerPath $installer.FullName
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remask-windows-x64-${{ github.sha }}
+          path: artifacts/windows/x64/
+          if-no-files-found: error

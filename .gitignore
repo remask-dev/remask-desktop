@@ -10,6 +10,7 @@ artifacts
 
 # Desktop generated files
 /remask-desktop/dist/
+/remask-desktop/.cache/
 /remask-desktop/node_modules/
 /remask-desktop/src-tauri/target/
 /remask-desktop/src-tauri/binaries/*
@@ -21,3 +22,4 @@ artifacts
 /remask-desktop/src-tauri/resources/onnxruntime/*
 !/remask-desktop/src-tauri/resources/onnxruntime/.gitkeep
 !/remask-desktop/src-tauri/resources/onnxruntime/README.txt
+/remask-desktop/src-tauri/resources/windows-runtime/

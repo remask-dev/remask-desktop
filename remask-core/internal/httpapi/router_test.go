@@ -123,8 +123,8 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 		t.Fatalf("gzip audit detail: %d %s", detailResponse.Code, detailResponse.Body.String())
 	}
 	detailBody := detailResponse.Body.String()
-	if detailResponse.Code != http.StatusOK || strings.Contains(detailBody, "sk-test-1234567890123456") || !strings.Contains(detailBody, "sk-***456") || !strings.Contains(detailBody, `\u003cMASK_SECRET_KEY:`) {
-		t.Fatalf("audit detail was not safely masked: %d %s", detailResponse.Code, detailBody)
+	if detailResponse.Code != http.StatusOK || !strings.Contains(detailBody, "sk-test-1234567890123456") || !strings.Contains(detailBody, `\u003cMASK_SECRET_KEY:`) {
+		t.Fatalf("audit detail did not include the original and redacted values: %d %s", detailResponse.Code, detailBody)
 	}
 }
 

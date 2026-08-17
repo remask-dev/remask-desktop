@@ -695,7 +695,7 @@ func (g *Gateway) redactJSON(ctx context.Context, body []byte, operation profile
 			return "", err
 		}
 		currentScope = result.ScopeID
-		field := audit.Field{Path: match.Path, OriginalMasked: maskOriginal(match.Value, result.Entities), Redacted: result.Text}
+		field := audit.Field{Path: match.Path, OriginalMasked: match.Value, Redacted: result.Text}
 		for _, entity := range result.Entities {
 			masked := "***"
 			if entity.StartByte >= 0 && entity.EndByte <= len(match.Value) && entity.StartByte < entity.EndByte {
@@ -727,18 +727,6 @@ func stringInSliceFold(value string, candidates []string) bool {
 		}
 	}
 	return false
-}
-
-func maskOriginal(text string, entities []pii.Entity) string {
-	masked := text
-	for index := len(entities) - 1; index >= 0; index-- {
-		entity := entities[index]
-		if entity.StartByte < 0 || entity.EndByte > len(masked) || entity.StartByte >= entity.EndByte {
-			continue
-		}
-		masked = masked[:entity.StartByte] + maskValue(masked[entity.StartByte:entity.EndByte]) + masked[entity.EndByte:]
-	}
-	return masked
 }
 
 func maskValue(value string) string {
@@ -822,11 +810,38 @@ func extractModelFromPath(path string) string {
 
 func usageFromValue(value any) audit.TokenUsage {
 	result := audit.TokenUsage{}
+	// Anthropic reports input usage as three separate fields: uncached input,
+	// cache creation input, and cache read input.  The other providers expose a
+	// single prompt/input count, so keep the provider-specific components here
+	// and normalize them into the common TokenUsage shape below.
+	anthropicInput := 0
+	anthropicCacheCreation := 0
+	anthropicCacheRead := 0
+	hasAnthropicCacheFields := false
 	var walk func(any)
 	walk = func(current any) {
 		switch typed := current.(type) {
 		case map[string]any:
 			for key, child := range typed {
+				if number, ok := child.(float64); ok {
+					n := int(number)
+					switch key {
+					case "cache_creation_input_tokens":
+						if n > anthropicCacheCreation {
+							anthropicCacheCreation = n
+						}
+						hasAnthropicCacheFields = true
+					case "cache_read_input_tokens":
+						if n > anthropicCacheRead {
+							anthropicCacheRead = n
+						}
+						hasAnthropicCacheFields = true
+					case "input_tokens":
+						if n > anthropicInput {
+							anthropicInput = n
+						}
+					}
+				}
 				if key == "cached_tokens" || key == "cache_read_input_tokens" || key == "cachedContentTokenCount" || key == "prompt_cache_hit_tokens" {
 					if number, ok := child.(float64); ok && int(number) > result.Cached {
 						result.Cached = int(number)
@@ -859,6 +874,13 @@ func usageFromValue(value any) audit.TokenUsage {
 		}
 	}
 	walk(value)
+	if hasAnthropicCacheFields {
+		// Anthropic's input_tokens excludes both cache components.  Normalize it
+		// to the full prompt size so cached cannot exceed input in the audit UI.
+		if totalInput := anthropicInput + anthropicCacheCreation + anthropicCacheRead; totalInput > result.Input {
+			result.Input = totalInput
+		}
+	}
 	if result.Total == 0 {
 		result.Total = result.Input + result.Output
 	}
@@ -873,6 +895,12 @@ func mergeTokenUsage(target *audit.TokenUsage, value audit.TokenUsage) {
 	}
 	if value.Total > target.Total {
 		target.Total = value.Total
+	}
+	// Streaming providers may report input and output usage in separate events.
+	// Recompute the derived total after merging those fields rather than keeping
+	// the first event's partial total.
+	if sum := target.Input + target.Output; sum > target.Total {
+		target.Total = sum
 	}
 	if target.Total == 0 {
 		target.Total = target.Input + target.Output

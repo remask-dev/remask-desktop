@@ -79,7 +79,9 @@ type TokenUsage struct {
 }
 
 type Field struct {
-	Path           string   `json:"path"`
+	Path string `json:"path"`
+	// OriginalMasked keeps its legacy JSON name for stored-log and desktop
+	// compatibility, but now contains the original request field verbatim.
 	OriginalMasked string   `json:"original_masked"`
 	Redacted       string   `json:"redacted"`
 	Entities       []Entity `json:"entities"`
@@ -304,7 +306,7 @@ func (s *Store) Add(entry Entry) error {
 		entry.GatewayType = GatewayTypeAPI
 	}
 	// Request logs are always recorded as metadata. The content toggle only
-	// controls whether masked field previews and AI-bound payloads are kept;
+	// controls whether original field previews and AI-bound payloads are kept;
 	// aggregate counters such as entity_count stay intact for statistics.
 	s.mu.RLock()
 	settings := s.settings

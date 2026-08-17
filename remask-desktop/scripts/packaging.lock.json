@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "onnxRuntime": {
+    "version": "1.28.0",
+    "package": {
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.28.0/microsoft.ml.onnxruntime.1.28.0.nupkg",
+      "sha256": "769d1d3ea8ab6cd69f737c9dd4d4462aa4ad0ccfa106eaf506efc40d7bead5db"
+    },
+    "targets": {
+      "macos-arm64": {
+        "path": "runtimes/osx-arm64/native/libonnxruntime.dylib",
+        "sha256": "244e53902258550e4b3afc3231c3cf8ba860173fc47a1fb572082ed822e6973f"
+      },
+      "windows-x64": {
+        "path": "runtimes/win-x64/native/onnxruntime.dll",
+        "sha256": "18370c375f07357fa5874344a9d9ac17e6b6fe1eb18b1dd209d79483b4470257"
+      },
+      "windows-arm64": {
+        "path": "runtimes/win-arm64/native/onnxruntime.dll",
+        "sha256": "102342326311ad62879b808840b4e3fd1372c41d8c871b59536d89a3c64d53f2"
+      },
+      "linux-x64": {
+        "path": "runtimes/linux-x64/native/libonnxruntime.so",
+        "sha256": "1461ef7cc3d9e49982591721683cc3e3a55580aeca9a5254e7aac47b75ee4bab"
+      },
+      "linux-arm64": {
+        "path": "runtimes/linux-arm64/native/libonnxruntime.so",
+        "sha256": "f1ec1a08eb99bd6e5401340f0a2b101381bf4694415480291dc13bcaa30f9ec7"
+      }
+    }
+  },
+  "windowsVCLibs": {
+    "x64": {
+      "url": "https://download.microsoft.com/download/4/7/c/47c6134b-d61f-4024-83bd-b9c9ea951c25/Microsoft.VCLibs.x64.14.00.Desktop.appx",
+      "sha256": "b56a9101f706f9d95f815f5b7fa6efbac972e86573d378b96a07cff5540c5961"
+    }
+  },
+  "models": {
+    "openai-privacy-filter-q4f16": {
+      "repo": "openai/privacy-filter",
+      "revision": "7ffa9a043d54d1be65afb281eddf0ffbe629385b",
+      "variant": "q4f16",
+      "manifestSha256": "155eaabaea359aaccc3171bb25b15e575205bcea6f3b681b2c2e9db54d4391d5",
+      "files": {
+        "config.json": "b2b26a4a4a000639ad30b0c264adbefe365bdb567fbd7bb27303b8c438375bd1",
+        "labels.json": "67f1075901da866be778e7ac92ed5bf98e7aadfa856e5ccc14c8cf8b5c1738d8",
+        "model.onnx": "eaae4e83cf1345a60abe333ed882b55fe5775d1dfbf34b9b269e5e5416f45e5b",
+        "model_q4f16.onnx_data": "6d4dde787e03ace283c45d4e32a94eec32b6cfcc242e7219bea96f5b4c13569d",
+        "tokenizer.json": "0614fe83cadab421296e664e1f48f4261fa8fef6e03e63bb75c20f38e37d07d3",
+        "tokenizer_config.json": "6c14af9ce1a284d3c3c5146b26efe4cd589c68e1dd4e9d94455606ec911ba774",
+        "viterbi_calibration.json": "bbc8611ef08a55ed72d64856cbbbb9a91db8dfa881f0a92e2afbad6e4bbc775a"
+      }
+    }
+  }
+}

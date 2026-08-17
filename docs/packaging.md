@@ -23,20 +23,33 @@ npm run package:linux
 
 `npm run desktop:build` remains an alias for `package:current`.
 
+These local commands may produce cross-build artifacts for development. A
+release build must set `REMASK_RELEASE=1`, which rejects non-native hosts. The
+Windows release workflow builds on `windows-latest`, silently installs the
+NSIS package, loads the locked ONNX model through `remask-core -self-test`,
+starts the desktop executable, and uploads the artifact only after all checks
+pass.
+
 ## ONNX Runtime inputs
 
-Set one platform-specific path. `REMASK_ONNXRUNTIME_LIBRARY` remains available
-as a generic override.
+The standard package command downloads the ONNX Runtime version and target
+listed in `scripts/packaging.lock.json`, verifies its SHA-256, and never reuses
+a previously staged runtime. A custom runtime must provide both its path and
+its expected checksum. `REMASK_ONNXRUNTIME_LIBRARY` remains available as a
+generic path override.
 
 ```bash
 export REMASK_ONNXRUNTIME_MACOS_LIBRARY=/path/to/libonnxruntime.dylib
 export REMASK_ONNXRUNTIME_WINDOWS_LIBRARY=/path/to/onnxruntime.dll
 export REMASK_ONNXRUNTIME_LINUX_LIBRARY=/path/to/libonnxruntime.so
+export REMASK_ONNXRUNTIME_SHA256=<expected-sha256>
 ```
 
 Provider companion libraries in the same directory are copied automatically.
-The default bundled model is `openai-privacy-filter-q4f16`; set
-`REMASK_MODEL_IDS` to a comma-separated list to override it.
+Every bundled model ID, revision, manifest, and file checksum must also be
+listed in the packaging lock. The default is
+`openai-privacy-filter-q4f16`; set `REMASK_MODEL_IDS` to a comma-separated list
+of other locked models.
 
 ## Platform requirements
 
@@ -69,8 +82,11 @@ export TAURI_BUNDLER_TOOLS_GITHUB_MIRROR_TEMPLATE='https://mirror.example/<owner
 
 The standard script statically links the LLVM-MinGW runtime so the installed
 application does not require `libunwind.dll`. It also installs
-`WebView2Loader.dll` beside `remask-desktop.exe` and fails the build if the
-known runtime dependency checks do not pass.
+`WebView2Loader.dll` and the ONNX Runtime VC++ dependencies beside the app
+executables, and fails the build if the known runtime dependency checks do not
+pass. The x64 VC++ files are downloaded once from Microsoft and cached under
+`remask-desktop/.cache`; set `REMASK_WINDOWS_VC_RUNTIME_DIR` to use a local
+redistributable directory instead.
 
 ### Linux
 
