@@ -30,7 +30,7 @@ func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {
 	upstreamServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		received = string(body)
-		token := extractEmailToken(received)
+		token := extractRuleToken(received)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"restored `+token+`"}}]}`)
 	}))
@@ -46,7 +46,7 @@ func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {
 	defer proxyServer.Close()
 
 	client := inspectedClient(t, proxyServer.URL, application.RootCertificatePEM())
-	request, _ := http.NewRequest(http.MethodPost, upstreamServer.URL+"/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"email foo@example.com"}]}`))
+	request, _ := http.NewRequest(http.MethodPost, upstreamServer.URL+"/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"secret sk-test-1234567890123456"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
@@ -54,10 +54,10 @@ func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {
 	}
 	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
-	if strings.Contains(received, "foo@example.com") || !strings.Contains(received, "<MASK_EMAIL:") {
+	if strings.Contains(received, "sk-test-1234567890123456") || !strings.Contains(received, "<MASK_SECRET_KEY:") {
 		t.Fatalf("upstream received unprotected body: %s", received)
 	}
-	if !strings.Contains(string(body), "foo@example.com") || strings.Contains(string(body), "<MASK_EMAIL:") {
+	if !strings.Contains(string(body), "sk-test-1234567890123456") || strings.Contains(string(body), "<MASK_SECRET_KEY:") {
 		t.Fatalf("response was not restored: %s", body)
 	}
 	if !strings.Contains(logs.String(), `forward_proxy_request method=CONNECT target="`+request.URL.Host+`" path="-"`) ||
@@ -170,7 +170,7 @@ func TestConfiguredHTTPSUpstreamIsProtectedOverSOCKS5(t *testing.T) {
 	upstreamServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		received = string(body)
-		token := extractEmailToken(received)
+		token := extractRuleToken(received)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"restored `+token+`"}}]}`)
 	}))
@@ -189,7 +189,7 @@ func TestConfiguredHTTPSUpstreamIsProtectedOverSOCKS5(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tlsConnection.Close()
-	payload := `{"messages":[{"role":"user","content":"email socks@example.com"}]}`
+	payload := `{"messages":[{"role":"user","content":"secret sk-socks-1234567890123456"}]}`
 	_, _ = fmt.Fprintf(tlsConnection, "POST /v1/chat/completions HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", upstreamURL.Host, len(payload), payload)
 	response, err := http.ReadResponse(bufio.NewReader(tlsConnection), &http.Request{Method: http.MethodPost})
 	if err != nil {
@@ -197,10 +197,10 @@ func TestConfiguredHTTPSUpstreamIsProtectedOverSOCKS5(t *testing.T) {
 	}
 	body, _ := io.ReadAll(response.Body)
 	_ = response.Body.Close()
-	if strings.Contains(received, "socks@example.com") || !strings.Contains(received, "<MASK_EMAIL:") {
+	if strings.Contains(received, "sk-socks-1234567890123456") || !strings.Contains(received, "<MASK_SECRET_KEY:") {
 		t.Fatalf("SOCKS5 upstream received unprotected body: %s", received)
 	}
-	if !strings.Contains(string(body), "socks@example.com") || strings.Contains(string(body), "<MASK_EMAIL:") {
+	if !strings.Contains(string(body), "sk-socks-1234567890123456") || strings.Contains(string(body), "<MASK_SECRET_KEY:") {
 		t.Fatalf("SOCKS5 response was not restored: %s", body)
 	}
 }
@@ -419,8 +419,8 @@ func inspectedClient(t *testing.T, proxyAddress string, rootPEM []byte) *http.Cl
 	}}
 }
 
-func extractEmailToken(body string) string {
-	start := strings.Index(body, "<MASK_EMAIL:")
+func extractRuleToken(body string) string {
+	start := strings.Index(body, "<MASK_SECRET_KEY:")
 	if start < 0 {
 		return ""
 	}

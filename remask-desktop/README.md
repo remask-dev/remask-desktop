@@ -29,18 +29,22 @@ The desktop Settings view can install the generated Remask CA into the current u
 
 The same view provides quick-launch buttons for Claude Code and Codex. A new terminal starts with HTTP(S)_PROXY pointing to the HTTP endpoint, ALL_PROXY pointing to the SOCKS5 endpoint, and process-local CA variables already set. Quick launch does not add or enable protection rules and does not modify the user's shell profile or global proxy settings. On macOS, reusable launchers are written under `~/.remask/launchers` with mode `0700`.
 
-## Stage the desktop sidecar
+## Desktop development and packaging
 
-For local development, use the one-command desktop workflows. Both commands
-rebuild and stage the Go sidecar before Tauri starts, so source changes cannot
-silently run against an older Core binary:
+For local development, rebuild and stage the Go sidecar before Tauri starts so
+source changes cannot silently run against an older Core binary:
 
 ```bash
 # Rebuild Core and start the Tauri development app
 npm run desktop:dev
 
-# Rebuild Core and create the production desktop bundle
-npm run desktop:build
+# Package for the current host platform
+npm run package:current
+
+# Explicit platform entry points
+npm run package:macos
+npm run package:windows
+npm run package:linux
 ```
 
 After the first successful staging, these commands reuse the ONNX Runtime
@@ -58,14 +62,25 @@ development terminal and can be followed with:
 tail -f ~/.remask/logs/core.log
 ```
 
-Before building a production Tauri bundle, stage the ONNX-enabled core, model package, and platform runtime:
+The packaging commands rebuild the ONNX-enabled Core, stage the model and
+platform runtime, invoke Tauri, and copy distributable files plus SHA-256
+checksums to `../artifacts/<platform>/<arch>/<version>/`.
+
+Set the appropriate ONNX Runtime input before the first build:
 
 ```bash
-REMASK_ONNXRUNTIME_LIBRARY=/absolute/path/to/libonnxruntime.dylib npm run stage:core
-npm run tauri build
+REMASK_ONNXRUNTIME_MACOS_LIBRARY=/absolute/path/to/libonnxruntime.dylib npm run package:macos
+REMASK_ONNXRUNTIME_WINDOWS_LIBRARY=/absolute/path/to/onnxruntime.dll npm run package:windows
+REMASK_ONNXRUNTIME_LINUX_LIBRARY=/absolute/path/to/libonnxruntime.so npm run package:linux
 ```
 
-Set `TARGET_TRIPLE` when cross-compiling. By default the staging script bundles `openai-privacy-filter-q4`. Override this through `REMASK_MODEL_IDS` and `REMASK_ACTIVE_MODEL`. The shell scans bundled models in place through `--builtin-models-dir`, keeps downloads in the user `--models-dir`, and passes `--onnxruntime-lib` before activating the selected model. Bundled models are read-only and are not copied into the user's home directory.
+Windows x64 cross-builds use LLVM-MinGW and Rust's
+`x86_64-pc-windows-gnullvm` target; set `REMASK_WINDOWS_TOOLCHAIN_DIR` to the
+LLVM-MinGW root. macOS packages must be built on macOS, and Linux packages on
+Linux or a Linux CI runner. See [Desktop packaging](../docs/packaging.md) for
+prerequisites, architecture overrides, bundle selection, and signing. By
+default the staging script bundles `openai-privacy-filter-q4f16`; override it
+through `REMASK_MODEL_IDS`.
 
 The Core selects the platform GPU provider automatically. Override it with `REMASK_ONNX_PROVIDER` (`coreml`, `directml`, `cuda`, `tensorrt`, `rocm`, `openvino`, or `cpu`) and `REMASK_ONNX_DEVICE` when launching the desktop app or sidecar. The runtime bundle must include provider companion libraries for CUDA/ROCm/OpenVINO/DirectML; `stage:core` copies these files from the same directory as `REMASK_ONNXRUNTIME_LIBRARY`.
 

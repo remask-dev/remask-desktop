@@ -7,6 +7,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 
 func TestRedactReturnsTextAndEntitiesThenRestores(t *testing.T) {
 	service := newTestService(t)
-	input := "请联系 foo@example.com"
+	input := "请联系 sk-test-1234567890123456"
 
 	result, err := service.Redact(context.Background(), input, "")
 	if err != nil {
@@ -28,7 +29,7 @@ func TestRedactReturnsTextAndEntitiesThenRestores(t *testing.T) {
 		t.Fatal("expected redacted text")
 	}
 	for _, entity := range result.Entities {
-		if !regexp.MustCompile(`^<MASK_[A-Z][A-Z0-9_]*:[A-F0-9]{4}>$`).MatchString(entity.Replacement) {
+		if !regexp.MustCompile(`^<MASK_SECRET_KEY:[A-F0-9]{4}>$`).MatchString(entity.Replacement) {
 			t.Fatalf("invalid replacement %q", entity.Replacement)
 		}
 		if entity.Text != "" {
@@ -47,11 +48,11 @@ func TestRedactReturnsTextAndEntitiesThenRestores(t *testing.T) {
 
 func TestSameValueReusesTokenWithinScope(t *testing.T) {
 	service := newTestService(t)
-	first, err := service.Redact(context.Background(), "foo@example.com", "")
+	first, err := service.Redact(context.Background(), "sk-test-1234567890123456", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.Redact(context.Background(), "再次联系 foo@example.com", first.ScopeID)
+	second, err := service.Redact(context.Background(), "再次联系 sk-test-1234567890123456", first.ScopeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +63,11 @@ func TestSameValueReusesTokenWithinScope(t *testing.T) {
 
 func TestSameValueReusesTokenAcrossRequestScopes(t *testing.T) {
 	service := newTestService(t)
-	first, err := service.Redact(context.Background(), "foo@example.com", "")
+	first, err := service.Redact(context.Background(), "sk-test-1234567890123456", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.Redact(context.Background(), "foo@example.com", "")
+	second, err := service.Redact(context.Background(), "sk-test-1234567890123456", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +88,11 @@ func TestSameValueReusesTokenAcrossStoreRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := NewService(NewRuleDetector(), firstStore).Redact(context.Background(), "foo@example.com", "")
+	first, err := NewService(NewRuleDetector(), firstStore).Redact(context.Background(), "sk-test-1234567890123456", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := NewService(NewRuleDetector(), secondStore).Redact(context.Background(), "foo@example.com", "")
+	second, err := NewService(NewRuleDetector(), secondStore).Redact(context.Background(), "sk-test-1234567890123456", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestEntityTypePolicyOnlyFiltersModelEntities(t *testing.T) {
 	if err := rules.Configure(policy); err != nil {
 		t.Fatal(err)
 	}
-	input := "请联系 foo@example.com 电话 13800138000"
+	input := "请联系 sk-test-1234567890123456 电话 13800138000"
 	phoneStart := strings.Index(input, "13800138000")
 	model := staticDetector{entities: []Entity{{Type: "PHONE_NUMBER", Text: "13800138000", StartByte: phoneStart, EndByte: phoneStart + len("13800138000"), Confidence: 0.9, Sources: []string{"model:test"}}}}
 	store, err := scope.NewMemoryStore(time.Minute)
@@ -138,7 +139,7 @@ func TestEntityTypePolicyOnlyFiltersModelEntities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`<MASK_EMAIL:[A-F0-9]{4}>`).MatchString(result.Text) || !strings.Contains(result.Text, "13800138000") {
+	if !regexp.MustCompile(`<MASK_SECRET_KEY:[A-F0-9]{4}>`).MatchString(result.Text) || !strings.Contains(result.Text, "13800138000") {
 		t.Fatalf("entity policy affected the wrong detector: %s", result.Text)
 	}
 }
@@ -177,6 +178,42 @@ func TestEntityCacheReusesDetectionAndRefreshesTTL(t *testing.T) {
 	}
 	if got := detector.calls; got != 2 {
 		t.Fatalf("detector called %d times after expiry, want 2", got)
+	}
+}
+
+func TestClearEntityCachePreventsInflightDetectionFromRepopulatingCache(t *testing.T) {
+	input := "sk-test-1234567890123456"
+	detector := &blockingDetector{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		entity:  Entity{Type: "SECRET_KEY", Text: input, StartByte: 0, EndByte: len(input)},
+	}
+	store, err := scope.NewMemoryStore(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewServiceWithCache(detector, store, EntityCacheConfig{Enabled: true, TTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, detectErr := service.Detect(context.Background(), input)
+		firstDone <- detectErr
+	}()
+	<-detector.started
+	service.ClearEntityCache()
+	close(detector.release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Detect(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if got := detector.calls.Load(); got != 2 {
+		t.Fatalf("detector called %d times, want 2 after cache invalidation", got)
 	}
 }
 
@@ -292,6 +329,22 @@ func TestEntityCacheFactorySelectsRedisBackend(t *testing.T) {
 type countingDetector struct {
 	entities []Entity
 	calls    int
+}
+
+type blockingDetector struct {
+	started chan struct{}
+	release chan struct{}
+	entity  Entity
+	calls   atomic.Int32
+}
+
+func (d *blockingDetector) ID() string { return "blocking" }
+func (d *blockingDetector) Detect(context.Context, string) ([]Entity, error) {
+	if d.calls.Add(1) == 1 {
+		close(d.started)
+		<-d.release
+	}
+	return []Entity{d.entity}, nil
 }
 
 type failingEntityCache struct{ config EntityCacheConfig }

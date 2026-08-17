@@ -99,6 +99,7 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 		modelsDir = "models"
 	}
 	models := model.NewManager(modelsDir, options.Runtime, detector, operations)
+	models.SetModelChangeHook(service.ClearEntityCache)
 	if options.BuiltinModelsDir != "" {
 		models.SetReadOnlyRoots(options.BuiltinModelsDir)
 	}

@@ -6,3 +6,5 @@ Remask 是一个本地优先的 AI PII 脱敏网关，由两个可独立构建�
 - `remask-desktop`：Tauri 桌面客户端，用于管理 sidecar、模型、策略、上游服务和运行状态，并提供系统 CA 安装与 Claude Code/Codex 受保护快捷启动。
 
 当前技术方案见 [docs/technical-design.md](docs/technical-design.md)。
+桌面端 macOS、Windows 和 Linux 的标准开发打包命令见
+[docs/packaging.md](docs/packaging.md)。

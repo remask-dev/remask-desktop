@@ -16,7 +16,6 @@ artifacts
 !/remask-desktop/src-tauri/binaries/.gitkeep
 /remask-desktop/src-tauri/resources/models/*
 /remask-desktop/src-tauri/resources/models.stage/
-/remask-desktop/src-tauri/resources/model-bundle.json
 !/remask-desktop/src-tauri/resources/models/.gitkeep
 !/remask-desktop/src-tauri/resources/models/README.txt
 /remask-desktop/src-tauri/resources/onnxruntime/*

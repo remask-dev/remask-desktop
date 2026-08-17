@@ -459,6 +459,15 @@ async fn install_system_certificate(
 }
 
 #[tauri::command]
+async fn uninstall_system_certificate(
+    app: AppHandle,
+) -> Result<system_integration::CertificateTrustStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || system_integration::uninstall_certificate(&app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn launch_ai_client(
     app: AppHandle,
     client: String,
@@ -593,6 +602,7 @@ pub fn run() {
             restart_core,
             system_certificate_status,
             install_system_certificate,
+            uninstall_system_certificate,
             launch_ai_client,
             launch_app_with_proxy,
             launch_preset_with_proxy

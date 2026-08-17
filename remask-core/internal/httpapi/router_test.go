@@ -17,7 +17,7 @@ import (
 
 func TestRedactAndRestoreAPI(t *testing.T) {
 	handler := testHandler(t)
-	redact := httptest.NewRequest(http.MethodPost, "/api/v1/redact", strings.NewReader(`{"text":"联系 foo@example.com"}`))
+	redact := httptest.NewRequest(http.MethodPost, "/api/v1/redact", strings.NewReader(`{"text":"密钥 sk-test-1234567890123456"}`))
 	redact.Header.Set("Content-Type", "application/json")
 	redactResponse := httptest.NewRecorder()
 	handler.ServeHTTP(redactResponse, redact)
@@ -43,7 +43,7 @@ func TestRedactAndRestoreAPI(t *testing.T) {
 	restore.Header.Set("Content-Type", "application/json")
 	restoreResponse := httptest.NewRecorder()
 	handler.ServeHTTP(restoreResponse, restore)
-	if restoreResponse.Code != http.StatusOK || !strings.Contains(restoreResponse.Body.String(), "foo@example.com") {
+	if restoreResponse.Code != http.StatusOK || !strings.Contains(restoreResponse.Body.String(), "sk-test-1234567890123456") {
 		t.Fatalf("restore response: %d %s", restoreResponse.Code, restoreResponse.Body.String())
 	}
 }
@@ -79,17 +79,17 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 		t.Fatalf("configure upstream: %d %s", configureResponse.Code, configureResponse.Body.String())
 	}
 
-	proxyRequest := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"邮箱 foo@example.com"}]}`))
+	proxyRequest := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"密钥 sk-test-1234567890123456"}]}`))
 	proxyRequest.Header.Set("Content-Type", "application/json")
 	proxyResponse := httptest.NewRecorder()
 	handler.ServeHTTP(proxyResponse, proxyRequest)
 	if proxyResponse.Code != http.StatusOK {
 		t.Fatalf("proxy response: %d %s", proxyResponse.Code, proxyResponse.Body.String())
 	}
-	if strings.Contains(string(upstreamBody), "foo@example.com") || !strings.Contains(string(upstreamBody), "<MASK_EMAIL:") {
+	if strings.Contains(string(upstreamBody), "sk-test-1234567890123456") || !strings.Contains(string(upstreamBody), "<MASK_SECRET_KEY:") {
 		t.Fatalf("upstream received unredacted content: %s", upstreamBody)
 	}
-	if !strings.Contains(proxyResponse.Body.String(), "foo@example.com") {
+	if !strings.Contains(proxyResponse.Body.String(), "sk-test-1234567890123456") {
 		t.Fatalf("client response was not restored: %s", proxyResponse.Body.String())
 	}
 
@@ -100,7 +100,7 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 		t.Fatalf("logs response: %d %s", logsResponse.Code, logsResponse.Body.String())
 	}
 	logsBody := logsResponse.Body.String()
-	if strings.Contains(logsBody, "foo@example.com") || strings.Contains(logsBody, "foo***com") || strings.Contains(logsBody, `MASK_EMAIL`) || strings.Contains(logsBody, `"fields"`) {
+	if strings.Contains(logsBody, "sk-test-1234567890123456") || strings.Contains(logsBody, "sk-***456") || strings.Contains(logsBody, `MASK_SECRET_KEY`) || strings.Contains(logsBody, `"fields"`) {
 		t.Fatalf("audit list included request content: %s", logsBody)
 	}
 	if !strings.Contains(logsBody, `"gateway_type":"api_gateway"`) {
@@ -123,7 +123,7 @@ func TestJSONProxyRedactsRequestAndRestoresResponse(t *testing.T) {
 		t.Fatalf("gzip audit detail: %d %s", detailResponse.Code, detailResponse.Body.String())
 	}
 	detailBody := detailResponse.Body.String()
-	if detailResponse.Code != http.StatusOK || strings.Contains(detailBody, "foo@example.com") || !strings.Contains(detailBody, "foo***com") || !strings.Contains(detailBody, `\u003cMASK_EMAIL:`) {
+	if detailResponse.Code != http.StatusOK || strings.Contains(detailBody, "sk-test-1234567890123456") || !strings.Contains(detailBody, "sk-***456") || !strings.Contains(detailBody, `\u003cMASK_SECRET_KEY:`) {
 		t.Fatalf("audit detail was not safely masked: %d %s", detailResponse.Code, detailBody)
 	}
 }
@@ -162,7 +162,7 @@ func TestGzipJSONProxyRedactsAndRecompressesRequest(t *testing.T) {
 	if settingsResponse.Code != http.StatusOK {
 		t.Fatalf("enable debug mode: %d %s", settingsResponse.Code, settingsResponse.Body.String())
 	}
-	body := gzipTestBody(t, `{"model":"custom-model","messages":[{"role":"user","content":"foo@example.com"}]}`)
+	body := gzipTestBody(t, `{"model":"custom-model","messages":[{"role":"user","content":"sk-test-1234567890123456"}]}`)
 	request := httptest.NewRequest(http.MethodPost, "/custom-model-endpoint", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Content-Encoding", "gzip")
@@ -175,7 +175,7 @@ func TestGzipJSONProxyRedactsAndRecompressesRequest(t *testing.T) {
 	if upstreamEncoding != "gzip" {
 		t.Fatalf("upstream content encoding = %q, want gzip", upstreamEncoding)
 	}
-	if strings.Contains(string(upstreamBody), "foo@example.com") || !strings.Contains(string(upstreamBody), "<MASK_EMAIL:") {
+	if strings.Contains(string(upstreamBody), "sk-test-1234567890123456") || !strings.Contains(string(upstreamBody), "<MASK_SECRET_KEY:") {
 		t.Fatalf("upstream received unredacted gzip content: %s", upstreamBody)
 	}
 
@@ -204,7 +204,7 @@ func TestGzipJSONProxyRedactsAndRecompressesRequest(t *testing.T) {
 	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode gzip audit detail: %v body=%s", err, detailResponse.Body.String())
 	}
-	if detail.Log.Debug == nil || !strings.Contains(detail.Log.Debug.Request.Body, "foo@example.com") || http.Header(detail.Log.Debug.Request.Headers).Get("Content-Encoding") != "" {
+	if detail.Log.Debug == nil || !strings.Contains(detail.Log.Debug.Request.Body, "sk-test-1234567890123456") || http.Header(detail.Log.Debug.Request.Headers).Get("Content-Encoding") != "" {
 		t.Fatalf("gzip debug request was not stored decoded: %#v body=%s", detail.Log.Debug, detailResponse.Body.String())
 	}
 }
@@ -311,12 +311,12 @@ func TestJSONProxyDoesNotRedactAssistantOrSystemMessagesByDefault(t *testing.T) 
 	})})
 	configureUpstream(t, handler)
 
-	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"system","content":"Contact system@example.com"},{"role":"assistant","content":"AI saw assistant@example.com"},{"role":"user","content":"user@example.com"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"system","content":"Contact system@example.com"},{"role":"assistant","content":"AI saw assistant@example.com"},{"role":"user","content":"secret sk-test-1234567890123456"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK || !strings.Contains(string(upstreamBody), "system@example.com") || !strings.Contains(string(upstreamBody), "assistant@example.com") || strings.Contains(string(upstreamBody), "user@example.com") {
+	if response.Code != http.StatusOK || !strings.Contains(string(upstreamBody), "system@example.com") || !strings.Contains(string(upstreamBody), "assistant@example.com") || strings.Contains(string(upstreamBody), "sk-test-1234567890123456") {
 		t.Fatalf("unexpected upstream body: status=%d body=%s", response.Code, upstreamBody)
 	}
 }
@@ -478,7 +478,7 @@ func TestJSONProxyUsesStableTokensAcrossIndependentRequests(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), configure)
 
 	for range 2 {
-		request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"邮箱 foo@example.com"}]}`))
+		request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"密钥 sk-test-1234567890123456"}]}`))
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -514,7 +514,7 @@ func TestSSEProxyRestoresTokenAcrossEvents(t *testing.T) {
 	configureResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configureResponse, configure)
 
-	proxyRequest := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"邮箱 foo@example.com"}],"stream":true}`))
+	proxyRequest := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"密钥 sk-test-1234567890123456"}],"stream":true}`))
 	proxyRequest.Header.Set("Content-Type", "application/json")
 	proxyResponse := httptest.NewRecorder()
 	handler.ServeHTTP(proxyResponse, proxyRequest)
@@ -522,7 +522,7 @@ func TestSSEProxyRestoresTokenAcrossEvents(t *testing.T) {
 		t.Fatalf("proxy response: %d %s", proxyResponse.Code, proxyResponse.Body.String())
 	}
 	response := proxyResponse.Body.String()
-	if !strings.Contains(response, "foo@example.com") || strings.Contains(response, "<MASK_EMAIL:") {
+	if !strings.Contains(response, "sk-test-1234567890123456") || strings.Contains(response, "<MASK_SECRET_KEY:") {
 		t.Fatalf("stream was not restored: %s", response)
 	}
 	if !strings.Contains(response, "data: [DONE]") {
@@ -591,19 +591,19 @@ func TestUnmatchedModelPathUsesGenericStrategy(t *testing.T) {
 	configureUpstream(t, handler)
 	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/custom-completions", strings.NewReader(`{`+
 		`"model":"custom-model",`+
-		`"instructions":"OpenAI foo@example.com",`+
-		`"messages":[{"role":"user","content":"Anthropic foo@example.com"}],`+
-		`"system":"System foo@example.com",`+
-		`"contents":[{"role":"user","parts":[{"text":"Gemini foo@example.com"}]}]`+
+		`"instructions":"OpenAI sk-test-1234567890123456",`+
+		`"messages":[{"role":"user","content":"Anthropic sk-test-1234567890123456"}],`+
+		`"system":"System sk-test-1234567890123456",`+
+		`"contents":[{"role":"user","parts":[{"text":"Gemini sk-test-1234567890123456"}]}]`+
 		`}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK || strings.Count(receivedBody, "foo@example.com") != 2 || !strings.Contains(receivedBody, "<MASK_EMAIL:") {
+	if response.Code != http.StatusOK || strings.Count(receivedBody, "sk-test-1234567890123456") != 2 || !strings.Contains(receivedBody, "<MASK_SECRET_KEY:") {
 		t.Fatalf("generic fallback did not redact request: status=%d body=%q", response.Code, receivedBody)
 	}
-	if strings.Count(response.Body.String(), "foo@example.com") != 4 || strings.Contains(response.Body.String(), "<MASK_EMAIL:") {
+	if strings.Count(response.Body.String(), "sk-test-1234567890123456") != 4 || strings.Contains(response.Body.String(), "<MASK_SECRET_KEY:") {
 		t.Fatalf("generic fallback did not restore response: %s", response.Body.String())
 	}
 
@@ -623,11 +623,11 @@ func TestAutoRouteUsesGenericStrategyForUnmatchedModelPath(t *testing.T) {
 	})}
 	handler := testHandlerWithClient(t, client)
 	configureUpstream(t, handler)
-	request := httptest.NewRequest(http.MethodPost, "/custom-model-endpoint", strings.NewReader(`{"model":"custom-model","messages":[{"role":"user","content":"foo@example.com"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/custom-model-endpoint", strings.NewReader(`{"model":"custom-model","messages":[{"role":"user","content":"sk-test-1234567890123456"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || receivedHost != "mock.example" || strings.Contains(receivedBody, "foo@example.com") {
+	if response.Code != http.StatusOK || receivedHost != "mock.example" || strings.Contains(receivedBody, "sk-test-1234567890123456") {
 		t.Fatalf("auto generic fallback failed: status=%d host=%q body=%q", response.Code, receivedHost, receivedBody)
 	}
 }
@@ -869,7 +869,7 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 }
 
 func extractToken(body string) string {
-	start := strings.Index(body, "<MASK_EMAIL:")
+	start := strings.Index(body, "<MASK_SECRET_KEY:")
 	if start < 0 {
 		return ""
 	}

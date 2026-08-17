@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/remask/remask-core/internal/scope"
@@ -18,6 +19,9 @@ type Service struct {
 	store       scope.Store
 	entityCache EntityCacheBackend
 	logger      *log.Logger
+
+	cacheMu         sync.RWMutex
+	cacheGeneration uint64
 }
 
 type detectionResult struct {
@@ -63,7 +67,10 @@ func (s *Service) Detect(ctx context.Context, text string) ([]Entity, error) {
 
 func (s *Service) detect(ctx context.Context, text string) (detectionResult, error) {
 	result := detectionResult{cacheState: "miss"}
+	var cacheGeneration uint64
 	if s.entityCache != nil {
+		s.cacheMu.RLock()
+		cacheGeneration = s.cacheGeneration
 		result.cacheEnabled = s.entityCache.Config().Enabled
 		if !result.cacheEnabled {
 			result.cacheState = "disabled"
@@ -71,6 +78,7 @@ func (s *Service) detect(ctx context.Context, text string) (detectionResult, err
 			result.entities = entities
 			result.cacheHit = true
 			result.cacheState = "hit"
+			s.cacheMu.RUnlock()
 			return result, nil
 		} else if err != nil {
 			// Cache failures are intentionally fail-open, but retaining the
@@ -78,6 +86,7 @@ func (s *Service) detect(ctx context.Context, text string) (detectionResult, err
 			result.cacheError = err
 			result.cacheState = "error"
 		}
+		s.cacheMu.RUnlock()
 	}
 	entities, err := s.detector.Detect(ctx, text)
 	if err != nil {
@@ -86,7 +95,11 @@ func (s *Service) detect(ctx context.Context, text string) (detectionResult, err
 	// A cache outage must never prevent local PII detection. Redis and other
 	// remote backends therefore fail open and are repopulated opportunistically.
 	if s.entityCache != nil {
-		_ = s.entityCache.Store(ctx, text, entities)
+		s.cacheMu.RLock()
+		if cacheGeneration == s.cacheGeneration {
+			_ = s.entityCache.Store(ctx, text, entities)
+		}
+		s.cacheMu.RUnlock()
 	}
 	result.entities = cloneEntities(entities)
 	return result, nil
@@ -198,6 +211,9 @@ func (s *Service) EntityCacheConfig() EntityCacheConfig {
 func (s *Service) ClearEntityCache() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.cacheGeneration++
 	_ = s.entityCache.Clear(ctx)
 }
 

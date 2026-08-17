@@ -26,6 +26,7 @@ type Manager struct {
 	detector      *pii.DynamicDetector
 	operations    *operation.Store
 	selection     *SelectionStore
+	onModelChange func()
 
 	transitionMu       sync.Mutex
 	mu                 sync.RWMutex
@@ -36,6 +37,13 @@ type Manager struct {
 
 func (m *Manager) SetSelectionStore(store *SelectionStore) {
 	m.selection = store
+}
+
+// SetModelChangeHook registers work that must run after the active detector
+// changes. The application uses it to invalidate detection results cached by
+// the previous model.
+func (m *Manager) SetModelChangeHook(hook func()) {
+	m.onModelChange = hook
 }
 
 func NewManager(root string, runtime Runtime, detector *pii.DynamicDetector, operations *operation.Store) *Manager {
@@ -312,6 +320,7 @@ func (m *Manager) commitActive(id string, managed *managedSession) error {
 	if previousDetector != nil && previousSession != nil {
 		_ = previousSession.Close()
 	}
+	m.notifyModelChange()
 	return nil
 }
 
@@ -330,10 +339,18 @@ func (m *Manager) Unload() error {
 		m.packages[id] = item
 	}
 	m.mu.Unlock()
+	var closeErr error
 	if previousDetector != nil && previous != nil {
-		return previous.Close()
+		closeErr = previous.Close()
 	}
-	return nil
+	m.notifyModelChange()
+	return closeErr
+}
+
+func (m *Manager) notifyModelChange() {
+	if m.onModelChange != nil {
+		m.onModelChange()
+	}
 }
 
 // Delete removes a downloaded model package from the managed models directory.

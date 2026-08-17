@@ -394,7 +394,7 @@ Manifest 示例：
 
 桌面打包前由 `remask-desktop/scripts/stage-core.sh` 构建带 `onnxruntime` tag 的 sidecar，并将选定模型和动态库暂存到 Tauri resources。开发源码目录不复制模型，保持 `remask-core` 与 `remask-desktop` 的发布边界清晰。
 
-核心支持通过 `--active-model` 或 `REMASK_ACTIVE_MODEL` 指定启动模型。指定后必须在开始监听 HTTP 前完成模型包校验、Session 创建和自检；任一步失败都终止启动，避免桌面显示核心在线但实际悄然退化为仅规则模式。桌面发行版默认传入随包模型 ID，服务端部署可以不设置该参数并通过管理 API 切换模型。
+核心支持通过 `--active-model` 或 `REMASK_ACTIVE_MODEL` 指定启动模型。指定后必须在开始监听 HTTP 前完成模型包校验、Session 创建和自检；任一步失败都终止启动，避免桌面显示核心在线但实际悄然退化为仅规则模式。桌面发行版不显式指定模型，由 Core 从随包的可用模型中自动选择；服务端部署也可以不设置该参数并通过管理 API 切换模型。
 
 ## 10. Profile 规范
 

@@ -186,6 +186,29 @@ func TestActivateSyncLoadsAndMarksModelActive(t *testing.T) {
 	}
 }
 
+func TestModelChangeHookRunsAfterActivationAndUnload(t *testing.T) {
+	root := t.TempDir()
+	createTestPackage(t, root, "privacy-q4")
+	manager := NewManager(root, testRuntime{}, pii.NewDynamicDetector(pii.NewRuleDetector()), operation.NewStore())
+	changes := 0
+	manager.SetModelChangeHook(func() { changes++ })
+	if _, err := manager.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ActivateSync(context.Background(), "privacy-q4"); err != nil {
+		t.Fatal(err)
+	}
+	if changes != 1 {
+		t.Fatalf("model change hook ran %d times after activation, want 1", changes)
+	}
+	if err := manager.Unload(); err != nil {
+		t.Fatal(err)
+	}
+	if changes != 2 {
+		t.Fatalf("model change hook ran %d times after unload, want 2", changes)
+	}
+}
+
 func TestModelSelectionPersistsActivationAndExplicitUnload(t *testing.T) {
 	root := t.TempDir()
 	dataDir := t.TempDir()
