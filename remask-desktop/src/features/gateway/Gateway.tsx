@@ -16,13 +16,13 @@ import { Input } from "../../shared/ui/Input";
 import { PageState } from "../../shared/ui/PageState";
 import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
+import type { QuickLaunchPreset } from "../launch/QuickLaunch";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const blankProvider: Upstream = { id: "", base_url: "", profile_id: "openai", credential_mode: "passthrough", enabled: true };
 const blankProxyRule: ProxyRule = { id: "", hosts: [""], profile_id: "generic", enabled: true };
 type GatewayData = { upstreams: Upstream[]; profiles: Profile[]; proxyCA: ProxyCAStatus; proxyRules: ProxyRule[] };
 type SystemCertificateStatus = { supported: boolean; installed: boolean; platform: string };
-type QuickLaunchPreset = "claude-code" | "codex" | "codex-cli" | "terminal" | "browser";
 
 export function Gateway() {
   const query = useGatewayData();
