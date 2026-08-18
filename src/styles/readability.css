@@ -1515,3 +1515,113 @@ main {
     font-size: 10px;
   }
 }
+
+/* Compact top-bar quick launch. */
+.topbar-quick-launch {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.topbar-quick-launch__trigger {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #617286;
+  background: rgb(232 237 243 / 42%);
+  font-size: var(--font-caption);
+  font-weight: 580;
+}
+
+.topbar-quick-launch__trigger:hover,
+.topbar-quick-launch__trigger[aria-expanded="true"] {
+  color: #405a73;
+  background: rgb(226 232 239 / 66%);
+}
+
+.topbar-quick-launch__trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgb(111 142 174 / 16%);
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.topbar-quick-launch__trigger > svg:last-child {
+  color: #8a98a7;
+  transition: transform .14s ease;
+}
+
+.topbar-quick-launch__trigger > svg:first-child {
+  color: #75889a;
+}
+
+.topbar-quick-launch__trigger[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.topbar-quick-launch__menu {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 5px);
+  right: 0;
+  width: 188px;
+  padding: 5px;
+  border: 1px solid rgb(207 217 226 / 62%);
+  border-radius: 8px;
+  background: rgb(252 253 254 / 98%);
+  box-shadow: 0 10px 28px rgb(29 52 76 / 11%);
+}
+
+.topbar-quick-launch__menu > button {
+  width: 100%;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  color: #3e5267;
+  background: transparent;
+  font-size: var(--font-caption);
+  text-align: left;
+}
+
+.topbar-quick-launch__menu > button:hover,
+.topbar-quick-launch__menu > button:focus-visible {
+  outline: 0;
+  color: #214f78;
+  background: #f1f4f7;
+}
+
+.topbar-quick-launch__menu svg {
+  color: #6f8497;
+}
+
+.topbar-quick-launch__divider {
+  height: 1px;
+  margin: 4px 5px;
+  background: #e5eaf0;
+}
+
+@media (max-width: 700px) {
+  .topbar-quick-launch__trigger {
+    width: 32px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .topbar-quick-launch__trigger span,
+  .topbar-quick-launch__trigger > svg:last-child {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-quick-launch__trigger > svg:last-child {
+    transition: none;
+  }
+}
