@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/remask/remask-core/internal/audit"
@@ -146,6 +148,15 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	}
 
 	profiles := profile.NewRegistry(profile.Builtins()...)
+	if strings.TrimSpace(options.DataDir) != "" {
+		profilesDir := filepath.Join(options.DataDir, "profiles")
+		if err := profile.EnsureExampleFile(profilesDir); err != nil {
+			return nil, fmt.Errorf("initialize request adapter example: %w", err)
+		}
+		if err := profiles.LoadDir(profilesDir); err != nil {
+			return nil, fmt.Errorf("load request adapter profiles: %w", err)
+		}
+	}
 	upstreams, err := upstream.NewRegistry(options.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("initialize upstream registry: %w", err)

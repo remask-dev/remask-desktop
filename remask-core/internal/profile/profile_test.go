@@ -1,8 +1,124 @@
 package profile
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestEnsureExampleFileInitializesFreshProfilesDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "profiles")
+	if err := EnsureExampleFile(directory); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(directory, ExampleFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var example Profile
+	if err := json.Unmarshal(data, &example); err != nil {
+		t.Fatal(err)
+	}
+	if example.ID != "example-openai-compatible" || len(example.Operations) == 0 || example.HeaderTemplates["Authorization"] == "" {
+		t.Fatalf("incomplete example profile: %#v", example)
+	}
+	registry := NewRegistry(Builtins()...)
+	if err := registry.LoadDir(directory); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Get(example.ID); !ok {
+		t.Fatal("initialized example was not available in the registry")
+	}
+}
+
+func TestEnsureExampleFileDoesNotModifyExistingProfilesDirectory(t *testing.T) {
+	directory := t.TempDir()
+	existingPath := filepath.Join(directory, "custom.json")
+	existing := []byte(`{"id":"custom","name":"Custom","operations":[]}`)
+	if err := os.WriteFile(existingPath, existing, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureExampleFile(directory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, ExampleFileName)); !os.IsNotExist(err) {
+		t.Fatalf("example should not be added beside an existing profile: %v", err)
+	}
+	unchanged, err := os.ReadFile(existingPath)
+	if err != nil || string(unchanged) != string(existing) {
+		t.Fatalf("existing profile changed: %v", err)
+	}
+}
+
+func TestEnsureExampleFileDoesNotRepopulateExistingEmptyDirectory(t *testing.T) {
+	directory := t.TempDir()
+	if err := EnsureExampleFile(directory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, ExampleFileName)); !os.IsNotExist(err) {
+		t.Fatalf("example should only be created with the directory: %v", err)
+	}
+}
+
+func TestRegistryLoadsProfilesFromDirectory(t *testing.T) {
+	directory := t.TempDir()
+	data := []byte(`{"id":"custom","name":"Custom API","operations":[{"id":"chat","methods":["POST"],"paths":["/chat"],"request_text_fields":["/prompt"],"response_text_fields":["/answer"]}]}`)
+	if err := os.WriteFile(filepath.Join(directory, "custom.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(Builtins()...)
+	if err := registry.LoadDir(directory); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok := registry.Get("custom")
+	if !ok || loaded.Name != "Custom API" {
+		t.Fatalf("custom profile not loaded: %#v", loaded)
+	}
+	if _, err := registry.Match("custom", "POST", "/chat"); err != nil {
+		t.Fatalf("custom profile did not match: %v", err)
+	}
+}
+
+func TestRegistryUserProfileOverridesBuiltin(t *testing.T) {
+	directory := t.TempDir()
+	data := []byte(`{"profiles":[{"id":"openai","name":"Local OpenAI","operations":[]}]}`)
+	if err := os.WriteFile(filepath.Join(directory, "override.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(Builtins()...)
+	if err := registry.LoadDir(directory); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := registry.Get("openai")
+	if loaded.Name != "Local OpenAI" {
+		t.Fatalf("built-in profile was not overridden: %#v", loaded)
+	}
+}
+
+func TestRegistryRefreshRemovesDeletedUserProfiles(t *testing.T) {
+	directory := t.TempDir()
+	profilePath := filepath.Join(directory, "custom.json")
+	if err := os.WriteFile(profilePath, []byte(`{"id":"custom","name":"Custom","operations":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(Builtins()...)
+	if err := registry.LoadDir(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(profilePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Get("custom"); ok {
+		t.Fatal("deleted custom profile remained in registry")
+	}
+	if _, ok := registry.Get("openai"); !ok {
+		t.Fatal("refresh removed built-in profiles")
+	}
+}
 
 func TestOpenAIProfileMatchesChatCompletionsAndResponses(t *testing.T) {
 	registry := NewRegistry(Builtins()...)

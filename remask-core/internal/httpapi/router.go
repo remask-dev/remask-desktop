@@ -283,6 +283,10 @@ func (r *Router) deleteScope(w http.ResponseWriter, request *http.Request) {
 }
 
 func (r *Router) listProfiles(w http.ResponseWriter, _ *http.Request) {
+	if err := r.profiles.Refresh(); err != nil {
+		writeError(w, http.StatusInternalServerError, "PROFILE_SCAN_FAILED", err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"profiles": r.profiles.List()})
 }
 
