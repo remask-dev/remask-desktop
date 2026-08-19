@@ -1191,6 +1191,9 @@ main {
   align-items: center;
   flex: 0 0 auto;
   gap: 8px;
+  margin-left: 2px;
+  padding-left: 20px;
+  border-left: 1px solid #dce4ec;
   color: #69798b;
   font-size: var(--font-utility);
 }
@@ -1502,6 +1505,10 @@ main {
 
   .proxy-access-ca > span:first-child {
     display: none;
+  }
+
+  .proxy-access-ca {
+    padding-left: 10px;
   }
 
 }
