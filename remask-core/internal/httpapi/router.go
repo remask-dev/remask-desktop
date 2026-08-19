@@ -433,7 +433,7 @@ type settingsRequest struct {
 	} `json:"models"`
 	entityCacheEnabledSet    bool
 	entityCacheTTLSecondsSet bool
-	debugSet                 bool
+	recordRawRequestSet      bool
 }
 
 // UnmarshalJSON tracks the presence of optional settings so partial updates
@@ -459,7 +459,7 @@ func (r *settingsRequest) UnmarshalJSON(data []byte) error {
 		}
 		_, r.entityCacheEnabledSet = fields["entity_cache_enabled"]
 		_, r.entityCacheTTLSecondsSet = fields["entity_cache_ttl_seconds"]
-		_, r.debugSet = fields["debug"]
+		_, r.recordRawRequestSet = fields["record_raw_request"]
 	}
 	r.Models = value.Models
 	return nil
@@ -477,8 +477,8 @@ func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
 	if !input.entityCacheTTLSecondsSet {
 		input.Audit.EntityCacheTTLSeconds = current.EntityCacheTTLSeconds
 	}
-	if !input.debugSet {
-		input.Audit.Debug = current.Debug
+	if !input.recordRawRequestSet {
+		input.Audit.RecordRawRequest = current.RecordRawRequest
 	}
 	if input.Models != nil {
 		input.Audit.HFBaseURL = strings.TrimSpace(input.Models.HFBaseURL)

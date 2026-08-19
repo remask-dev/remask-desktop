@@ -19,7 +19,7 @@ const timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 type Settings struct {
 	RecordRequestContent  bool   `json:"record_request_content"`
-	Debug                 bool   `json:"debug,omitempty"`
+	RecordRawRequest      bool   `json:"record_raw_request"`
 	RetentionDays         int    `json:"retention_days"`
 	HFBaseURL             string `json:"hf_base_url,omitempty"`
 	MaxInferenceTokens    int    `json:"max_inference_tokens"`
@@ -87,47 +87,46 @@ type Field struct {
 	Entities       []Entity `json:"entities"`
 }
 
-type DebugRequest struct {
+// RawRequest is the unredacted request received by the gateway. It is stored
+// only when RecordRawRequest is enabled because it may contain sensitive data.
+type RawRequest struct {
 	Method  string              `json:"method"`
 	URL     string              `json:"url"`
 	Headers map[string][]string `json:"headers,omitempty"`
 	Body    string              `json:"body,omitempty"`
 }
 
-type DebugResponse struct {
+// RawResponse is the response returned to the client. It shares the raw-
+// request retention setting.
+type RawResponse struct {
 	Status  int                 `json:"status"`
 	Headers map[string][]string `json:"headers,omitempty"`
 	Body    string              `json:"body,omitempty"`
 }
 
-type DebugExchange struct {
-	Request  DebugRequest  `json:"request"`
-	Response DebugResponse `json:"response"`
-}
-
 type Entry struct {
-	ID             string         `json:"id"`
-	Timestamp      time.Time      `json:"timestamp"`
-	UpstreamID     string         `json:"upstream_id"`
-	ProfileID      string         `json:"profile_id"`
-	OperationID    string         `json:"operation_id"`
-	Model          string         `json:"model,omitempty"`
-	ProtectionMode string         `json:"protection_mode,omitempty"`
-	GatewayType    string         `json:"gateway_type"`
-	TargetHost     string         `json:"target_host,omitempty"`
-	Method         string         `json:"method"`
-	Path           string         `json:"path"`
-	StatusCode     int            `json:"status_code"`
-	DurationMS     int64          `json:"duration_ms"`
-	Streaming      bool           `json:"streaming"`
-	RequestBytes   int64          `json:"request_bytes"`
-	ResponseBytes  int64          `json:"response_bytes"`
-	EntityCount    int            `json:"entity_count"`
-	TokenUsage     TokenUsage     `json:"token_usage"`
-	Fields         []Field        `json:"fields,omitempty"`
-	Debug          *DebugExchange `json:"debug,omitempty"`
-	Extra          ExtraData      `json:"-"`
-	ErrorCode      string         `json:"error_code,omitempty"`
+	ID             string       `json:"id"`
+	Timestamp      time.Time    `json:"timestamp"`
+	UpstreamID     string       `json:"upstream_id"`
+	ProfileID      string       `json:"profile_id"`
+	OperationID    string       `json:"operation_id"`
+	Model          string       `json:"model,omitempty"`
+	ProtectionMode string       `json:"protection_mode,omitempty"`
+	GatewayType    string       `json:"gateway_type"`
+	TargetHost     string       `json:"target_host,omitempty"`
+	Method         string       `json:"method"`
+	Path           string       `json:"path"`
+	StatusCode     int          `json:"status_code"`
+	DurationMS     int64        `json:"duration_ms"`
+	Streaming      bool         `json:"streaming"`
+	RequestBytes   int64        `json:"request_bytes"`
+	ResponseBytes  int64        `json:"response_bytes"`
+	EntityCount    int          `json:"entity_count"`
+	TokenUsage     TokenUsage   `json:"token_usage"`
+	Fields         []Field      `json:"fields,omitempty"`
+	RawRequest     *RawRequest  `json:"raw_request,omitempty"`
+	RawResponse    *RawResponse `json:"raw_response,omitempty"`
+	ErrorCode      string       `json:"error_code,omitempty"`
 }
 
 type Query struct {
@@ -252,7 +251,8 @@ func (s *Store) initialize() error {
 			token_total INTEGER NOT NULL,
 			token_cached INTEGER NOT NULL DEFAULT 0,
 			fields_json TEXT NOT NULL,
-			extra_json TEXT NOT NULL DEFAULT '',
+			raw_request_json TEXT NOT NULL DEFAULT '',
+			raw_response_json TEXT NOT NULL DEFAULT '',
 			error_code TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_audit_entries_timestamp ON audit_entries(timestamp DESC);
@@ -268,6 +268,74 @@ func (s *Store) initialize() error {
 	`)
 	if err != nil {
 		return err
+	}
+	// Existing installations stored the raw request and response together in
+	// extra_json. Add dedicated columns and carry both forward; the legacy
+	// column is deliberately no longer read or written.
+	if err := addColumnIfMissing(s.db, `ALTER TABLE audit_entries ADD COLUMN raw_request_json TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(s.db, `ALTER TABLE audit_entries ADD COLUMN raw_response_json TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	return s.migrateLegacyRawRequests()
+}
+
+func addColumnIfMissing(db *sql.DB, statement string) error {
+	_, err := db.Exec(statement)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) migrateLegacyRawRequests() error {
+	rows, err := s.db.Query(`SELECT id, extra_json FROM audit_entries WHERE raw_request_json = '' AND extra_json != ''`)
+	if err != nil {
+		// Fresh databases do not have the retired extra_json column.
+		if strings.Contains(strings.ToLower(err.Error()), "no such column") {
+			return nil
+		}
+		return err
+	}
+	type legacyExchange struct {
+		id       string
+		request  string
+		response string
+	}
+	exchanges := []legacyExchange{}
+	for rows.Next() {
+		var id, extra string
+		if err := rows.Scan(&id, &extra); err != nil {
+			return err
+		}
+		var legacy struct {
+			Request  RawRequest  `json:"request"`
+			Response RawResponse `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(extra), &legacy); err != nil || legacy.Request.Method == "" {
+			continue
+		}
+		request, err := json.Marshal(legacy.Request)
+		if err != nil {
+			return err
+		}
+		response, err := json.Marshal(legacy.Response)
+		if err != nil {
+			return err
+		}
+		exchanges = append(exchanges, legacyExchange{id: id, request: string(request), response: string(response)})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, exchange := range exchanges {
+		if _, err := s.db.Exec(`UPDATE audit_entries SET raw_request_json = ?, raw_response_json = ? WHERE id = ?`, exchange.request, exchange.response, exchange.id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -314,15 +382,20 @@ func (s *Store) Add(entry Entry) error {
 	if !settings.RecordRequestContent {
 		entry.Fields = nil
 	}
-	if !settings.Debug {
-		entry.Debug = nil
+	if !settings.RecordRawRequest {
+		entry.RawRequest = nil
+		entry.RawResponse = nil
 	}
 	sortFields(entry.Fields)
 	fields, err := json.Marshal(entry.Fields)
 	if err != nil {
 		return err
 	}
-	extra, err := marshalExtra(entry)
+	rawRequest, err := marshalRawRequest(entry.RawRequest)
+	if err != nil {
+		return err
+	}
+	rawResponse, err := marshalRawResponse(entry.RawResponse)
 	if err != nil {
 		return err
 	}
@@ -334,12 +407,12 @@ func (s *Store) Add(entry Entry) error {
 	_, err = tx.Exec(`INSERT INTO audit_entries (
 		id, timestamp, upstream_id, profile_id, operation_id, model, protection_mode, gateway_type, target_host, method, path,
 		status_code, duration_ms, streaming, request_bytes, response_bytes, entity_count,
-		token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		token_input, token_output, token_total, token_cached, fields_json, raw_request_json, raw_response_json, error_code
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.Timestamp.UTC().Format(timestampLayout), entry.UpstreamID, entry.ProfileID,
 		entry.OperationID, entry.Model, entry.ProtectionMode, entry.GatewayType, entry.TargetHost, entry.Method, entry.Path, entry.StatusCode,
 		entry.DurationMS, entry.Streaming, entry.RequestBytes, entry.ResponseBytes, entry.EntityCount,
-		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), extra, entry.ErrorCode)
+		entry.TokenUsage.Input, entry.TokenUsage.Output, entry.TokenUsage.Total, entry.TokenUsage.Cached, string(fields), rawRequest, rawResponse, entry.ErrorCode)
 	if err != nil {
 		return err
 	}
@@ -360,51 +433,42 @@ func (s *Store) Add(entry Entry) error {
 	return s.prune(time.Now().UTC())
 }
 
-type ExtraData map[string]any
-
-func marshalExtra(entry Entry) (string, error) {
-	extra := ExtraData{}
-	for key, value := range entry.Extra {
-		extra[key] = value
-	}
-	if entry.Debug != nil {
-		extra["request"] = entry.Debug.Request
-		extra["response"] = entry.Debug.Response
-	}
-	if len(extra) == 0 {
+func marshalRawRequest(request *RawRequest) (string, error) {
+	if request == nil {
 		return "", nil
 	}
-	data, err := json.Marshal(extra)
+	data, err := json.Marshal(request)
 	return string(data), err
 }
 
-func unmarshalExtra(extraJSON string) (ExtraData, *DebugExchange) {
-	if extraJSON == "" {
-		return nil, nil
+func unmarshalRawRequest(rawRequestJSON string) *RawRequest {
+	if rawRequestJSON == "" {
+		return nil
 	}
-	var extra map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(extraJSON), &extra); err != nil {
-		return nil, nil
+	var request RawRequest
+	if err := json.Unmarshal([]byte(rawRequestJSON), &request); err != nil {
+		return nil
 	}
-	values := ExtraData{}
-	var debug DebugExchange
-	requestFound, responseFound := false, false
-	for key, data := range extra {
-		var value any
-		if json.Unmarshal(data, &value) == nil {
-			values[key] = value
-		}
-		switch key {
-		case "request":
-			requestFound = json.Unmarshal(data, &debug.Request) == nil
-		case "response":
-			responseFound = json.Unmarshal(data, &debug.Response) == nil
-		}
+	return &request
+}
+
+func marshalRawResponse(response *RawResponse) (string, error) {
+	if response == nil {
+		return "", nil
 	}
-	if requestFound && responseFound {
-		return values, &debug
+	data, err := json.Marshal(response)
+	return string(data), err
+}
+
+func unmarshalRawResponse(rawResponseJSON string) *RawResponse {
+	if rawResponseJSON == "" {
+		return nil
 	}
-	return values, nil
+	var response RawResponse
+	if err := json.Unmarshal([]byte(rawResponseJSON), &response); err != nil {
+		return nil
+	}
+	return &response
 }
 
 func (s *Store) List(query Query) []Entry {
@@ -430,7 +494,7 @@ func (s *Store) List(query Query) []Entry {
 	args = append(args, limit)
 	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
 		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
-		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
+		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, raw_request_json, raw_response_json, error_code
 		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
 	if err != nil {
 		return []Entry{}
@@ -439,23 +503,24 @@ func (s *Store) List(query Query) []Entry {
 	result := make([]Entry, 0, limit)
 	for rows.Next() {
 		var entry Entry
-		var timestamp, fields, extra string
+		var timestamp, fields, rawRequest, rawResponse string
 		if err := rows.Scan(&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
 			&entry.ProtectionMode, &entry.GatewayType, &entry.TargetHost, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
-			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &extra, &entry.ErrorCode); err != nil {
+			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &rawRequest, &rawResponse, &entry.ErrorCode); err != nil {
 			continue
 		}
 		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 		_ = json.Unmarshal([]byte(fields), &entry.Fields)
-		entry.Extra, entry.Debug = unmarshalExtra(extra)
+		entry.RawRequest = unmarshalRawRequest(rawRequest)
+		entry.RawResponse = unmarshalRawResponse(rawResponse)
 		result = append(result, entry)
 	}
 	return result
 }
 
 // ListSummaries returns only the columns needed by the audit log list. Large
-// field previews and debug exchanges stay in SQLite until a specific entry is
+// field previews and raw exchanges stay in SQLite until a specific entry is
 // opened through Get.
 func (s *Store) ListSummaries(query Query) []Entry {
 	limit := query.Limit
@@ -502,26 +567,27 @@ func (s *Store) ListSummaries(query Query) []Entry {
 	return result
 }
 
-// Get loads the complete audit entry, including field previews and any debug
-// exchange. It is intentionally separate from ListSummaries so list navigation
-// never pays the cost of decoding large request and response bodies.
+// Get loads the complete audit entry, including field previews and any raw
+// request/response exchange. It is intentionally separate from ListSummaries
+// so list navigation never pays the cost of decoding large payloads.
 func (s *Store) Get(id string) (Entry, bool) {
 	var entry Entry
-	var timestamp, fields, extra string
+	var timestamp, fields, rawRequest, rawResponse string
 	err := s.db.QueryRow(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
 		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
-		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, extra_json, error_code
+		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, raw_request_json, raw_response_json, error_code
 		FROM audit_entries WHERE id = ?`, id).Scan(
 		&entry.ID, &timestamp, &entry.UpstreamID, &entry.ProfileID, &entry.OperationID, &entry.Model,
 		&entry.ProtectionMode, &entry.GatewayType, &entry.TargetHost, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 		&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
-		&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &extra, &entry.ErrorCode)
+		&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &fields, &rawRequest, &rawResponse, &entry.ErrorCode)
 	if err != nil {
 		return Entry{}, false
 	}
 	entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 	_ = json.Unmarshal([]byte(fields), &entry.Fields)
-	entry.Extra, entry.Debug = unmarshalExtra(extra)
+	entry.RawRequest = unmarshalRawRequest(rawRequest)
+	entry.RawResponse = unmarshalRawResponse(rawResponse)
 	return entry, true
 }
 

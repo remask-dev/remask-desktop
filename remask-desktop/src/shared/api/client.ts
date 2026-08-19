@@ -1,4 +1,4 @@
-import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, LicenseState, LicenseStatus, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, ProxyRule, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
+import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, EntityTypeConfig, LicenseState, LicenseStatus, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, ProxyRule, RawRequest, RawResponse, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
 
 const trim = (value: string) => value.trim().replace(/\/$/, "");
 export const connection = {
@@ -157,7 +157,7 @@ function normalizeAuditSettings(value: unknown): AuditSettings {
   const provider = raw.inference_provider;
   return {
     record_request_content: boolean(raw.record_request_content),
-    debug: boolean(raw.debug),
+    record_raw_request: boolean(raw.record_raw_request),
     retention_days: number(raw.retention_days, 30),
     hf_base_url: optionalText(raw.hf_base_url),
     max_inference_tokens: number(raw.max_inference_tokens, 512),
@@ -209,12 +209,14 @@ function normalizeTokenUsage(value: unknown): TokenUsage | undefined {
   return { input: number(value.input), output: number(value.output), total: number(value.total), cached: number(value.cached) || undefined };
 }
 
-function normalizeDebug(value: unknown): DebugExchange | undefined {
-  if (!isRecord(value) || !isRecord(value.request) || !isRecord(value.response)) return undefined;
-  return {
-    request: { method: text(value.request.method), url: text(value.request.url), headers: headerRecord(value.request.headers), body: optionalText(value.request.body) },
-    response: { status: number(value.response.status), headers: headerRecord(value.response.headers), body: optionalText(value.response.body) },
-  };
+function normalizeRawRequest(value: unknown): RawRequest | undefined {
+	if (!isRecord(value)) return undefined;
+	return { method: text(value.method), url: text(value.url), headers: headerRecord(value.headers), body: optionalText(value.body) };
+}
+
+function normalizeRawResponse(value: unknown): RawResponse | undefined {
+	if (!isRecord(value)) return undefined;
+	return { status: number(value.status), headers: headerRecord(value.headers), body: optionalText(value.body) };
 }
 
 function normalizeLogSummary(log: Record<string, unknown>): AuditLogSummary {
@@ -236,7 +238,7 @@ function normalizeLogs(value: unknown): AuditLogSummary[] {
 
 function normalizeLog(value: unknown): AuditLog {
   const log = isRecord(value) ? value : {};
-  return { ...normalizeLogSummary(log), fields: records(log.fields).map(normalizeAuditField), debug: normalizeDebug(log.debug) };
+	return { ...normalizeLogSummary(log), fields: records(log.fields).map(normalizeAuditField), raw_request: normalizeRawRequest(log.raw_request), raw_response: normalizeRawResponse(log.raw_response) };
 }
 
 export const coreApi = {

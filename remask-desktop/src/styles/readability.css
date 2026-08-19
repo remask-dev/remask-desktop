@@ -491,9 +491,9 @@ main {
 .audit-field > summary,
 .audit-field section > span,
 .audit-field pre,
-.debug-part > header,
-.debug-part > section > span,
-.debug-part pre {
+.raw-part > header,
+.raw-part > section > span,
+.raw-part pre {
   font-size: var(--font-caption);
 }
 
@@ -503,18 +503,18 @@ main {
 }
 
 .audit-field pre,
-.debug-part pre {
+.raw-part pre {
   line-height: 1.6;
 }
 
-.debug-part > header {
+.raw-part > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.debug-part__copy {
+.raw-part__copy {
   width: 24px;
   height: 24px;
   display: grid;
@@ -528,7 +528,7 @@ main {
   transition: color .14s, background-color .14s;
 }
 
-.debug-part__copy:hover {
+.raw-part__copy:hover {
   color: #315b84;
   background: #e7eef6;
 }
@@ -543,7 +543,7 @@ main {
 .logs-view .detail-header code,
 .logs-view .detail-section--summary .property-grid dt,
 .logs-view .audit-field section > span,
-.logs-view .debug-part > section > span {
+.logs-view .raw-part > section > span {
   font-size: 8px;
 }
 
@@ -560,8 +560,8 @@ main {
 .logs-view .warning-callout p,
 .logs-view .audit-field > summary,
 .logs-view .audit-field pre,
-.logs-view .debug-part > header,
-.logs-view .debug-part pre {
+.logs-view .raw-part > header,
+.logs-view .raw-part pre {
   font-size: 9px;
 }
 
@@ -581,11 +581,11 @@ main {
   min-height: 32px;
 }
 
-.logs-view .debug-exchange--collapsible {
+.logs-view .raw-exchange--collapsible {
   padding: 0;
 }
 
-.logs-view .debug-exchange--collapsible > summary {
+.logs-view .raw-exchange--collapsible > summary {
   min-height: 42px;
   display: flex;
   align-items: center;
@@ -598,11 +598,11 @@ main {
   list-style: none;
 }
 
-.logs-view .debug-exchange--collapsible > summary::-webkit-details-marker {
+.logs-view .raw-exchange--collapsible > summary::-webkit-details-marker {
   display: none;
 }
 
-.logs-view .debug-exchange--collapsible > summary::before {
+.logs-view .raw-exchange--collapsible > summary::before {
   content: "›";
   color: #8a97a6;
   font-size: 13px;
@@ -610,15 +610,15 @@ main {
   transition: transform .15s;
 }
 
-.logs-view .debug-exchange--collapsible[open] > summary {
+.logs-view .raw-exchange--collapsible[open] > summary {
   border-bottom: 1px solid #e2e8ef;
 }
 
-.logs-view .debug-exchange--collapsible[open] > summary::before {
+.logs-view .raw-exchange--collapsible[open] > summary::before {
   transform: rotate(90deg);
 }
 
-.logs-view .debug-exchange__body {
+.logs-view .raw-exchange__body {
   padding: 12px 18px;
 }
 

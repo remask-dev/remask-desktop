@@ -155,12 +155,12 @@ func TestGzipJSONProxyRedactsAndRecompressesRequest(t *testing.T) {
 
 	handler := testHandlerWithClient(t, client)
 	configureUpstream(t, handler)
-	settings := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"audit":{"record_request_content":true,"debug":true,"retention_days":30,"max_inference_tokens":512,"inference_provider":"cpu","entity_cache_enabled":true,"entity_cache_ttl_seconds":300}}`))
+	settings := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"audit":{"record_request_content":true,"record_raw_request":true,"retention_days":30,"max_inference_tokens":512,"inference_provider":"cpu","entity_cache_enabled":true,"entity_cache_ttl_seconds":300}}`))
 	settings.Header.Set("Content-Type", "application/json")
 	settingsResponse := httptest.NewRecorder()
 	handler.ServeHTTP(settingsResponse, settings)
 	if settingsResponse.Code != http.StatusOK {
-		t.Fatalf("enable debug mode: %d %s", settingsResponse.Code, settingsResponse.Body.String())
+		t.Fatalf("enable raw request recording: %d %s", settingsResponse.Code, settingsResponse.Body.String())
 	}
 	body := gzipTestBody(t, `{"model":"custom-model","messages":[{"role":"user","content":"sk-test-1234567890123456"}]}`)
 	request := httptest.NewRequest(http.MethodPost, "/custom-model-endpoint", bytes.NewReader(body))
@@ -193,19 +193,17 @@ func TestGzipJSONProxyRedactsAndRecompressesRequest(t *testing.T) {
 	handler.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs/"+listed.Logs[0].ID, nil))
 	var detail struct {
 		Log struct {
-			Debug *struct {
-				Request struct {
-					Headers map[string][]string `json:"headers"`
-					Body    string              `json:"body"`
-				} `json:"request"`
-			} `json:"debug"`
+			RawRequest *struct {
+				Headers map[string][]string `json:"headers"`
+				Body    string              `json:"body"`
+			} `json:"raw_request"`
 		} `json:"log"`
 	}
 	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode gzip audit detail: %v body=%s", err, detailResponse.Body.String())
 	}
-	if detail.Log.Debug == nil || !strings.Contains(detail.Log.Debug.Request.Body, "sk-test-1234567890123456") || http.Header(detail.Log.Debug.Request.Headers).Get("Content-Encoding") != "" {
-		t.Fatalf("gzip debug request was not stored decoded: %#v body=%s", detail.Log.Debug, detailResponse.Body.String())
+	if detail.Log.RawRequest == nil || !strings.Contains(detail.Log.RawRequest.Body, "sk-test-1234567890123456") || http.Header(detail.Log.RawRequest.Headers).Get("Content-Encoding") != "" {
+		t.Fatalf("gzip raw request was not stored decoded: %#v body=%s", detail.Log.RawRequest, detailResponse.Body.String())
 	}
 }
 
@@ -248,13 +246,13 @@ func TestProtectedRouteRejectsOversizedDecompressedGzipRequest(t *testing.T) {
 	}
 }
 
-func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
+func TestRawRequestRecordingPersistsCompleteProxyExchange(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		_, _ = io.ReadAll(r.Body)
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"debug response"}}]}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"raw response"}}]}`)),
 			Request:    r,
 		}, nil
 	})}
@@ -266,15 +264,15 @@ func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
 	handler := combinedTestHandler(application.Handler(), application.ProxyHandler())
 	configureUpstream(t, handler)
 
-	settings := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"audit":{"record_request_content":true,"debug":true,"retention_days":30,"max_inference_tokens":512,"inference_provider":"cpu","entity_cache_enabled":true,"entity_cache_ttl_seconds":300}}`))
+	settings := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"audit":{"record_request_content":true,"record_raw_request":true,"retention_days":30,"max_inference_tokens":512,"inference_provider":"cpu","entity_cache_enabled":true,"entity_cache_ttl_seconds":300}}`))
 	settings.Header.Set("Content-Type", "application/json")
 	settingsResponse := httptest.NewRecorder()
 	handler.ServeHTTP(settingsResponse, settings)
 	if settingsResponse.Code != http.StatusOK {
-		t.Fatalf("enable debug mode: %d %s", settingsResponse.Code, settingsResponse.Body.String())
+		t.Fatalf("enable raw request recording: %d %s", settingsResponse.Code, settingsResponse.Body.String())
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"debug@example.com"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/proxy/mock/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"raw@example.com"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -283,9 +281,9 @@ func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
 	}
 	logsResponse := httptest.NewRecorder()
 	handler.ServeHTTP(logsResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs", nil))
-	if logsResponse.Code != http.StatusOK || strings.Contains(logsResponse.Body.String(), `"debug"`) ||
-		strings.Contains(logsResponse.Body.String(), "debug@example.com") || strings.Contains(logsResponse.Body.String(), "debug response") {
-		t.Fatalf("audit list included debug exchange: %d %s", logsResponse.Code, logsResponse.Body.String())
+	if logsResponse.Code != http.StatusOK || strings.Contains(logsResponse.Body.String(), `"raw_request"`) || strings.Contains(logsResponse.Body.String(), `"raw_response"`) ||
+		strings.Contains(logsResponse.Body.String(), "raw@example.com") || strings.Contains(logsResponse.Body.String(), "raw response") {
+		t.Fatalf("audit list included raw exchange: %d %s", logsResponse.Code, logsResponse.Body.String())
 	}
 	var listed struct {
 		Logs []struct {
@@ -297,9 +295,9 @@ func TestDebugModePersistsCompleteProxyExchange(t *testing.T) {
 	}
 	detailResponse := httptest.NewRecorder()
 	handler.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/audit/logs/"+listed.Logs[0].ID, nil))
-	if detailResponse.Code != http.StatusOK || !strings.Contains(detailResponse.Body.String(), `"debug":{"request"`) ||
-		!strings.Contains(detailResponse.Body.String(), "debug@example.com") || !strings.Contains(detailResponse.Body.String(), "debug response") {
-		t.Fatalf("debug exchange was not persisted: %d %s", detailResponse.Code, detailResponse.Body.String())
+	if detailResponse.Code != http.StatusOK || !strings.Contains(detailResponse.Body.String(), `"raw_request":{"method"`) || !strings.Contains(detailResponse.Body.String(), `"raw_response":{"status"`) ||
+		!strings.Contains(detailResponse.Body.String(), "raw@example.com") || !strings.Contains(detailResponse.Body.String(), "raw response") {
+		t.Fatalf("raw exchange was not persisted: %d %s", detailResponse.Code, detailResponse.Body.String())
 	}
 }
 

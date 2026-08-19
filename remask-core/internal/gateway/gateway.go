@@ -72,10 +72,11 @@ func New(logger *log.Logger, upstreams *upstream.Registry, profiles *profile.Reg
 	}
 }
 
-// DebugMode reports the live request tracing setting. It is intentionally
-// read for every request so changing the setting takes effect immediately.
-func (g *Gateway) DebugMode() bool {
-	return g.audits != nil && g.audits.Settings().Debug
+// RecordRawRequest reports the live raw-exchange retention setting. It is
+// intentionally read for every request so changing the setting takes effect
+// immediately.
+func (g *Gateway) RecordRawRequest() bool {
+	return g.audits != nil && g.audits.Settings().RecordRawRequest
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -105,11 +106,11 @@ func (g *Gateway) ServeProxyHTTP(w http.ResponseWriter, r *http.Request, ruleID,
 
 func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configured targetConfig, upstreamPath string, operation profile.Operation, matched bool, gatewayType string) {
 	redactionDuration := int64(0)
-	debug := g.DebugMode()
+	recordRawRequest := g.RecordRawRequest()
 	counted := &countingResponseWriter{ResponseWriter: w}
 	var requestBody bytes.Buffer
 	var requestHeaders http.Header
-	if debug {
+	if recordRawRequest {
 		counted.capture = &bytes.Buffer{}
 		requestHeaders = r.Header.Clone()
 	}
@@ -143,16 +144,14 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 		auditEntry.StatusCode = counted.StatusCode()
 		auditEntry.DurationMS = redactionDuration
 		auditEntry.ResponseBytes = counted.bytes
-		if debug {
-			auditEntry.Debug = &audit.DebugExchange{
-				Request: audit.DebugRequest{
-					Method: r.Method, URL: r.URL.RequestURI(),
-					Headers: map[string][]string(requestHeaders), Body: requestBody.String(),
-				},
-				Response: audit.DebugResponse{
-					Status: counted.StatusCode(), Headers: map[string][]string(counted.Header().Clone()),
-					Body: counted.capture.String(),
-				},
+		if recordRawRequest {
+			auditEntry.RawRequest = &audit.RawRequest{
+				Method: r.Method, URL: r.URL.RequestURI(),
+				Headers: map[string][]string(requestHeaders), Body: requestBody.String(),
+			}
+			auditEntry.RawResponse = &audit.RawResponse{
+				Status: counted.StatusCode(), Headers: map[string][]string(counted.Header().Clone()),
+				Body: counted.capture.String(),
 			}
 		}
 		if err := g.audits.Add(auditEntry); err != nil {
@@ -161,7 +160,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	}()
 
 	wireBody, err := readBody(r.Body, maxBodyBytes)
-	if debug {
+	if recordRawRequest {
 		_, _ = requestBody.Write(wireBody)
 	}
 	if err != nil {
@@ -174,7 +173,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 				auditEntry.RequestBytes = int64(len(wireBody))
 			}
 			remaining := io.Reader(r.Body)
-			if debug {
+			if recordRawRequest {
 				remaining = io.TeeReader(remaining, &requestBody)
 			}
 			g.serveOversizedPassthrough(w, r, configured, upstreamPath, io.MultiReader(bytes.NewReader(wireBody), remaining), &auditEntry)
@@ -189,7 +188,7 @@ func (g *Gateway) serveResolved(w http.ResponseWriter, r *http.Request, configur
 	var decodingErr error
 	if contentEncoding == "gzip" {
 		body, decodingErr = decodeGzipBody(wireBody, maxBodyBytes)
-		if decodingErr == nil && debug {
+		if decodingErr == nil && recordRawRequest {
 			requestBody.Reset()
 			_, _ = requestBody.Write(body)
 			requestHeaders.Del("Content-Encoding")

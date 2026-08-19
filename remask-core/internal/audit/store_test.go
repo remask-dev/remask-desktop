@@ -72,10 +72,10 @@ func TestStoreInitializesSettingsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(data), `"debug"`) {
-		t.Fatalf("default debug setting should not be written: %s", data)
+		t.Fatalf("retired debug setting should not be written: %s", data)
 	}
-	if got := store.Settings(); got.Debug {
-		t.Fatalf("debug should be disabled by default: %#v", got)
+	if got := store.Settings(); got.RecordRawRequest {
+		t.Fatalf("raw request recording should be disabled by default: %#v", got)
 	}
 }
 
@@ -90,7 +90,7 @@ func TestStoreRejectsIncompletePersistedSettings(t *testing.T) {
 	}
 }
 
-func TestStoreUsesOneGenericExtraColumn(t *testing.T) {
+func TestStoreUsesDedicatedRawExchangeColumns(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +111,8 @@ func TestStoreUsesOneGenericExtraColumn(t *testing.T) {
 		}
 		columns[name] = true
 	}
-	if !columns["extra_json"] || !columns["gateway_type"] || !columns["target_host"] || columns["debug_request_json"] || columns["debug_response_json"] {
-		t.Fatalf("unexpected audit extra columns: %#v", columns)
+	if !columns["raw_request_json"] || !columns["raw_response_json"] || !columns["gateway_type"] || !columns["target_host"] || columns["extra_json"] || columns["debug_request_json"] || columns["debug_response_json"] {
+		t.Fatalf("unexpected audit raw-exchange columns: %#v", columns)
 	}
 }
 
@@ -134,32 +134,62 @@ func TestStorePersistsProxyGatewayTypeInSummariesAndDetails(t *testing.T) {
 	}
 }
 
-func TestStoreWritesDebugExchangeDirectlyToExtraColumn(t *testing.T) {
+func TestStoreWritesRawExchangeToDedicatedColumns(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	settings := DefaultSettings()
-	settings.Debug = true
+	settings.RecordRawRequest = true
 	if err := store.Configure(settings); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Add(Entry{Debug: &DebugExchange{
-		Request:  DebugRequest{Method: "POST", URL: "/v1/chat/completions"},
-		Response: DebugResponse{Status: 200},
-	}}); err != nil {
+	if err := store.Add(Entry{
+		RawRequest:  &RawRequest{Method: "POST", URL: "/v1/chat/completions"},
+		RawResponse: &RawResponse{Status: 200},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	var extra string
-	if err := store.db.QueryRow(`SELECT extra_json FROM audit_entries LIMIT 1`).Scan(&extra); err != nil {
+	var request, response string
+	if err := store.db.QueryRow(`SELECT raw_request_json, raw_response_json FROM audit_entries LIMIT 1`).Scan(&request, &response); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(extra, `"debug"`) || !strings.Contains(extra, `"request"`) || !strings.Contains(extra, `"response"`) {
-		t.Fatalf("debug exchange should be stored directly in extra_json: %s", extra)
+	if !strings.Contains(request, `"method":"POST"`) || !strings.Contains(response, `"status":200`) {
+		t.Fatalf("raw exchange should be stored in dedicated columns: request=%s response=%s", request, response)
 	}
 	loaded := store.List(Query{Limit: 1})
-	if len(loaded) != 1 || loaded[0].Debug == nil || loaded[0].Debug.Response.Status != 200 {
-		t.Fatalf("debug exchange was not decoded from extra_json: %#v", loaded)
+	if len(loaded) != 1 || loaded[0].RawRequest == nil || loaded[0].RawResponse == nil || loaded[0].RawResponse.Status != 200 {
+		t.Fatalf("raw exchange was not decoded from dedicated columns: %#v", loaded)
+	}
+}
+
+func TestStoreMigratesLegacyExtraExchangeToDedicatedColumns(t *testing.T) {
+	directory := t.TempDir()
+	store, err := NewStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(Entry{ID: "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`ALTER TABLE audit_entries ADD COLUMN extra_json TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"request":{"method":"POST","url":"/legacy","body":"request"},"response":{"status":201,"body":"response"}}`
+	if _, err := store.db.Exec(`UPDATE audit_entries SET extra_json = ? WHERE id = 'legacy'`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := NewStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := migrated.Get("legacy")
+	if !ok || entry.RawRequest == nil || entry.RawRequest.Body != "request" || entry.RawResponse == nil || entry.RawResponse.Status != 201 || entry.RawResponse.Body != "response" {
+		t.Fatalf("legacy raw exchange was not migrated: %#v", entry)
 	}
 }
 
@@ -169,17 +199,15 @@ func TestStoreListsMetadataAndLoadsContentOnDemand(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := DefaultSettings()
-	settings.Debug = true
+	settings.RecordRawRequest = true
 	if err := store.Configure(settings); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Add(Entry{
-		UpstreamID: "openai",
-		Fields:     []Field{{Path: "/messages/0/content", OriginalMasked: "masked", Redacted: "redacted"}},
-		Debug: &DebugExchange{
-			Request:  DebugRequest{Method: "POST", Body: "complete request"},
-			Response: DebugResponse{Status: 200, Body: "complete response"},
-		},
+		UpstreamID:  "openai",
+		Fields:      []Field{{Path: "/messages/0/content", OriginalMasked: "masked", Redacted: "redacted"}},
+		RawRequest:  &RawRequest{Method: "POST", Body: "complete request"},
+		RawResponse: &RawResponse{Status: 200, Body: "complete response"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +216,11 @@ func TestStoreListsMetadataAndLoadsContentOnDemand(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("summaries = %#v", summaries)
 	}
-	if len(summaries[0].Fields) != 0 || summaries[0].Debug != nil || summaries[0].Extra != nil {
+	if len(summaries[0].Fields) != 0 || summaries[0].RawRequest != nil || summaries[0].RawResponse != nil {
 		t.Fatalf("list summary loaded detail content: %#v", summaries[0])
 	}
 	detail, ok := store.Get(summaries[0].ID)
-	if !ok || len(detail.Fields) != 1 || detail.Debug == nil || detail.Debug.Response.Body != "complete response" {
+	if !ok || len(detail.Fields) != 1 || detail.RawResponse == nil || detail.RawResponse.Body != "complete response" {
 		t.Fatalf("detail = %#v, found = %v", detail, ok)
 	}
 	if _, ok := store.Get("missing"); ok {
@@ -244,7 +272,7 @@ func TestEntityCacheSettingsDefaultOnAndPersisted(t *testing.T) {
 	}
 	settings.EntityCacheEnabled = false
 	settings.EntityCacheTTLSeconds = 60
-	settings.Debug = true
+	settings.RecordRawRequest = true
 	if err := store.Configure(settings); err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +280,7 @@ func TestEntityCacheSettingsDefaultOnAndPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := loaded.Settings(); got.EntityCacheEnabled || got.EntityCacheTTLSeconds != 60 || !got.Debug {
+	if got := loaded.Settings(); got.EntityCacheEnabled || got.EntityCacheTTLSeconds != 60 || !got.RecordRawRequest {
 		t.Fatalf("entity cache settings were not persisted: %#v", got)
 	}
 }
