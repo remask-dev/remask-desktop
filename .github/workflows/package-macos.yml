@@ -1,0 +1,96 @@
+name: Package macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package-macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: remask-desktop/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: remask-core/go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            remask-core/models
+            remask-desktop/.cache
+          key: macos-package-inputs-${{ hashFiles('remask-desktop/scripts/packaging.lock.json') }}
+
+      - name: Install desktop dependencies
+        working-directory: remask-desktop
+        run: npm ci
+
+      - name: Download locked model
+        working-directory: remask-core
+        run: |
+          if ! node ../remask-desktop/scripts/verify-packaging-inputs.mjs \
+            ../remask-desktop/scripts/packaging.lock.json - - models \
+            openai-privacy-filter-q4f16; then
+            rm -rf models/openai-privacy-filter-q4f16
+            go run ./cmd/remask-model-downloader \
+              -repo openai/privacy-filter \
+              -revision 7ffa9a043d54d1be65afb281eddf0ffbe629385b \
+              -variant q4f16 \
+              -id openai-privacy-filter-q4f16 \
+              -name "OpenAI Privacy Filter Q4F16" \
+              -output models
+          fi
+          node ../remask-desktop/scripts/verify-packaging-inputs.mjs \
+            ../remask-desktop/scripts/packaging.lock.json - - models \
+            openai-privacy-filter-q4f16
+
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_KEYCHAIN_PASSWORD"
+          certificate_path="$RUNNER_TEMP/remask-signing.p12"
+          keychain_path="$RUNNER_TEMP/remask-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$certificate_path"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          rm -f "$certificate_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path" login.keychain-db
+          security default-keychain -s "$keychain_path"
+
+      - name: Build signed and notarized macOS package
+        working-directory: remask-desktop
+        env:
+          REMASK_RELEASE: "1"
+          REMASK_SIGN: "1"
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run package:macos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remask-macos-${{ github.sha }}
+          path: artifacts/macos/
+          if-no-files-found: error

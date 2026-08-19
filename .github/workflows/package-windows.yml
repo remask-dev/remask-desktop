@@ -22,12 +22,32 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.24.13
+          go-version: 1.25.13
           cache-dependency-path: remask-core/go.sum
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: Import Windows signing certificate
+        shell: powershell
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) { throw "WINDOWS_CERTIFICATE secret is required" }
+          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw "WINDOWS_CERTIFICATE_PASSWORD secret is required" }
+          if ($env:WINDOWS_CERTIFICATE_THUMBPRINT -notmatch '^[A-Fa-f0-9]{40}$') { throw "WINDOWS_CERTIFICATE_THUMBPRINT must be a 40-character SHA-1 thumbprint" }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "remask-signing.pfx"
+          $certificateBytes = [Convert]::FromBase64String(($env:WINDOWS_CERTIFICATE -replace '\s', ''))
+          [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item -LiteralPath $certificatePath -Force
+          if ($certificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT.ToUpperInvariant()) {
+            throw "imported certificate thumbprint does not match WINDOWS_CERTIFICATE_THUMBPRINT"
+          }
 
       - uses: actions/cache@v4
         with:
@@ -66,6 +86,8 @@ jobs:
         env:
           REMASK_GO_CC: C:/msys64/mingw64/bin/gcc.exe
           REMASK_RELEASE: "1"
+          REMASK_SIGN: "1"
+          REMASK_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: npm run package:windows
 
       - name: Install and run Windows smoke test

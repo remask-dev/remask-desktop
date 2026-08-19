@@ -304,6 +304,105 @@ collect_artifacts() {
     log "artifact: $destination/$filename"
   done
   log "checksums: $destination/SHA256SUMS"
+  last_artifacts_dir="$destination"
+}
+
+validate_signing_configuration() {
+  local platform="$1"
+  local credentials_configured=0
+
+  case "$platform" in
+    macos)
+      require_command security
+      [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]] || die "APPLE_SIGNING_IDENTITY is required for a signed macOS release"
+      if ! security find-identity -v -p codesigning | grep -F "${APPLE_SIGNING_IDENTITY}" >/dev/null; then
+        die "APPLE_SIGNING_IDENTITY is not available in the macOS keychain"
+      fi
+
+      if [[ "$release_enabled" == "1" ]]; then
+        if [[ -n "${APPLE_API_ISSUER:-}" || -n "${APPLE_API_KEY:-}" || -n "${APPLE_API_KEY_PATH:-}" ]]; then
+          [[ -n "${APPLE_API_ISSUER:-}" && -n "${APPLE_API_KEY:-}" && -n "${APPLE_API_KEY_PATH:-}" ]] || \
+            die "APPLE_API_ISSUER, APPLE_API_KEY, and APPLE_API_KEY_PATH must all be set for notarization"
+          [[ -f "${APPLE_API_KEY_PATH}" ]] || die "Apple notarization key not found: ${APPLE_API_KEY_PATH}"
+          credentials_configured=1
+        elif [[ -n "${APPLE_ID:-}" || -n "${APPLE_PASSWORD:-}" || -n "${APPLE_TEAM_ID:-}" ]]; then
+          [[ -n "${APPLE_ID:-}" && -n "${APPLE_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]] || \
+            die "APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID must all be set for notarization"
+          credentials_configured=1
+        fi
+        ((credentials_configured == 1)) || die "Apple notarization credentials are required for a macOS release"
+      fi
+      ;;
+    windows)
+      [[ "${REMASK_WINDOWS_CERTIFICATE_THUMBPRINT:-}" =~ ^[A-Fa-f0-9]{40}$ ]] || \
+        die "REMASK_WINDOWS_CERTIFICATE_THUMBPRINT must be a 40-character SHA-1 certificate thumbprint"
+      ;;
+  esac
+}
+
+verify_release_artifact_signatures() {
+  local platform="$1"
+  local file
+
+  case "$platform" in
+    macos)
+      require_command spctl
+      require_command xcrun
+      while IFS= read -r -d '' file; do
+        spctl --assess --type open --context context:primary-signature --verbose=2 "$file"
+        xcrun stapler validate "$file"
+        log "verified signed and notarized artifact: $file"
+      done < <(find "$last_artifacts_dir" -maxdepth 1 -type f -name '*.dmg' -print0)
+      ;;
+    windows)
+      require_command powershell.exe
+      while IFS= read -r -d '' file; do
+        REMASK_SIGNATURE_FILE="$file" powershell.exe -NoProfile -NonInteractive -Command '
+          $signature = Get-AuthenticodeSignature -LiteralPath $env:REMASK_SIGNATURE_FILE
+          if ($signature.Status -ne "Valid") {
+            throw "invalid Authenticode signature for $($env:REMASK_SIGNATURE_FILE): $($signature.Status)"
+          }
+        '
+        log "verified Authenticode signature: $file"
+      done < <(find "$last_artifacts_dir" -maxdepth 1 -type f -name '*.exe' -print0)
+      ;;
+  esac
+}
+
+notarize_macos_disk_images() {
+  local target="$1"
+  local bundle_dir="$tauri_dir/target/$target/release/bundle/dmg"
+  local file
+  local -a credentials=()
+  local -a files=()
+
+  require_command xcrun
+  if [[ -n "${APPLE_API_ISSUER:-}" ]]; then
+    credentials=(
+      --issuer "$APPLE_API_ISSUER"
+      --key-id "$APPLE_API_KEY"
+      --key "$APPLE_API_KEY_PATH"
+    )
+  else
+    credentials=(
+      --apple-id "$APPLE_ID"
+      --password "$APPLE_PASSWORD"
+      --team-id "$APPLE_TEAM_ID"
+    )
+  fi
+
+  while IFS= read -r -d '' file; do files+=("$file"); done < <(
+    find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' -print0 2>/dev/null
+  )
+  ((${#files[@]} > 0)) || die "no macOS disk image found for notarization under $bundle_dir"
+
+  for file in "${files[@]}"; do
+    log "submitting final disk image for notarization: $file"
+    xcrun notarytool submit "$file" "${credentials[@]}" --wait
+    xcrun stapler staple "$file"
+    xcrun stapler validate "$file"
+    log "notarized and stapled final disk image: $file"
+  done
 }
 
 require_command go
@@ -368,6 +467,18 @@ if [[ "$platform" == "$host_platform" && "$arch" != "$host_arch" && -z "${REMASK
   die "cross-architecture Core builds require REMASK_GO_CC for $arch"
 fi
 
+release_enabled="${REMASK_RELEASE:-0}"
+sign_enabled="${REMASK_SIGN:-0}"
+[[ "$release_enabled" == "0" || "$release_enabled" == "1" ]] || die "REMASK_RELEASE must be 0 or 1"
+[[ "$sign_enabled" == "0" || "$sign_enabled" == "1" ]] || die "REMASK_SIGN must be 0 or 1"
+if [[ "$release_enabled" == "1" && ("$platform" == "macos" || "$platform" == "windows") ]]; then
+  [[ "$sign_enabled" != "0" || -z "${REMASK_SIGN+x}" ]] || die "release packages for $platform cannot disable signing"
+  sign_enabled=1
+fi
+if [[ "$sign_enabled" == "1" ]]; then
+  validate_signing_configuration "$platform"
+fi
+
 ensure_rust_target "$target"
 resolve_runtime_library "$platform" "$arch"
 runtime_library="$resolved_runtime_library"
@@ -387,7 +498,7 @@ REMASK_MODEL_IDS="$model_ids" \
 bash "$script_dir/stage-core.sh"
 
 tauri_args=(build --target "$target" --bundles "$bundles")
-if [[ "${REMASK_SIGN:-0}" != "1" ]]; then
+if [[ "$sign_enabled" != "1" ]]; then
   tauri_args+=(--no-sign)
 fi
 
@@ -399,7 +510,13 @@ if [[ "$platform" == "windows" ]]; then
   if [[ "$target" == "x86_64-pc-windows-gnullvm" ]]; then
     windows_resource_map+=",\"target/$target/release/WebView2Loader.dll\":\"\""
   fi
-  windows_runtime_config="{\"bundle\":{\"resources\":{$windows_resource_map}}}"
+  windows_signing_config=""
+  if [[ "$sign_enabled" == "1" ]]; then
+    windows_timestamp_url="${REMASK_WINDOWS_TIMESTAMP_URL:-http://timestamp.digicert.com}"
+    [[ "$windows_timestamp_url" =~ ^https?:// ]] || die "REMASK_WINDOWS_TIMESTAMP_URL must be an HTTP(S) URL"
+    windows_signing_config=",\"windows\":{\"certificateThumbprint\":\"${REMASK_WINDOWS_CERTIFICATE_THUMBPRINT}\",\"digestAlgorithm\":\"sha256\",\"timestampUrl\":\"${windows_timestamp_url}\"}"
+  fi
+  windows_runtime_config="{\"bundle\":{\"resources\":{$windows_resource_map}$windows_signing_config}}"
   tauri_args+=(--config "$windows_runtime_config")
 fi
 
@@ -428,4 +545,10 @@ trap - EXIT
 if [[ "$platform" == "windows" ]]; then
   verify_windows_runtime_dependencies "$target"
 fi
+if [[ "$platform" == "macos" && "$release_enabled" == "1" && "$sign_enabled" == "1" ]]; then
+  notarize_macos_disk_images "$target"
+fi
 collect_artifacts "$platform" "$arch" "$target"
+if [[ "$release_enabled" == "1" && "$sign_enabled" == "1" ]]; then
+  verify_release_artifact_signatures "$platform"
+fi

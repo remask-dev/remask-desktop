@@ -23,12 +23,14 @@ npm run package:linux
 
 `npm run desktop:build` remains an alias for `package:current`.
 
-These local commands may produce cross-build artifacts for development. A
-release build must set `REMASK_RELEASE=1`, which rejects non-native hosts. The
-Windows release workflow builds on `windows-latest`, silently installs the
-NSIS package, loads the locked ONNX model through `remask-core -self-test`,
-starts the desktop executable, and uploads the artifact only after all checks
-pass.
+These local commands may produce unsigned cross-build artifacts for
+development. A release build must set `REMASK_RELEASE=1`, which rejects
+non-native hosts and automatically requires code signing on macOS and Windows.
+Setting `REMASK_SIGN=0` is rejected in release mode. The Windows release
+workflow imports its signing certificate, builds on `windows-latest`, verifies
+the Authenticode signature, silently installs the NSIS package, loads the
+locked ONNX model through `remask-core -self-test`, starts the desktop
+executable, and uploads the artifact only after all checks pass.
 
 ## ONNX Runtime inputs
 
@@ -102,8 +104,71 @@ REMASK_LINUX_BUNDLES=deb,rpm,appimage npm run package:linux
 
 Use `REMASK_ARCH=x64` or `REMASK_ARCH=arm64`. A non-native architecture also
 requires `REMASK_GO_CC` to point to a suitable cgo cross compiler. Developer
-packages are unsigned by default. Set `REMASK_SIGN=1` only after configuring
-the platform signing identity or Tauri signing command.
+packages are unsigned by default; set `REMASK_SIGN=1` to test a configured
+signing identity without enabling release mode.
+
+macOS release builds require `APPLE_SIGNING_IDENTITY` and notarization
+credentials. Use either App Store Connect API credentials:
+
+```bash
+export APPLE_SIGNING_IDENTITY='Developer ID Application: Example (TEAMID)'
+export APPLE_API_ISSUER='<issuer-id>'
+export APPLE_API_KEY='<key-id>'
+export APPLE_API_KEY_PATH='/secure/path/AuthKey_KEYID.p8'
+REMASK_RELEASE=1 npm run package:macos
+```
+
+or Apple ID credentials by setting `APPLE_ID`, `APPLE_PASSWORD`, and
+`APPLE_TEAM_ID`. After Tauri notarizes the application, the release command
+also submits the final DMG, staples its ticket, validates it with Gatekeeper,
+and only then generates the release checksum.
+
+The GitHub macOS workflow expects `APPLE_CERTIFICATE` (Base64 PKCS#12),
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_KEYCHAIN_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`
+secrets.
+
+### Formal local macOS release
+
+The formal local entry point requires a clean worktree, a `v<version>` tag on
+`HEAD`, a Developer ID Application identity in the login keychain, and Apple
+notarization credentials:
+
+```bash
+export APPLE_ID='developer@example.com'
+export APPLE_TEAM_ID='TEAMID1234'
+export APPLE_SIGNING_IDENTITY='Developer ID Application: Example (TEAMID1234)'
+
+# Store the app-specific password without writing it to a project file.
+security add-generic-password -U \
+  -a "$APPLE_ID" \
+  -s remask-notary-password \
+  -w
+
+cd remask-desktop
+npm run release:macos
+```
+
+The script reads the app-specific password from the macOS keychain, runs
+`npm ci`, builds with `REMASK_RELEASE=1`, and verifies SHA-256, the DMG image,
+Gatekeeper acceptance, and the stapled notarization ticket. For a local
+release-candidate build before committing or tagging, use
+`REMASK_ALLOW_DIRTY=1 REMASK_ALLOW_UNTAGGED=1`; those overrides should not be
+used for the final published artifact.
+
+Windows release builds require a code-signing certificate installed in the
+current user's certificate store:
+
+```bash
+export REMASK_WINDOWS_CERTIFICATE_THUMBPRINT='<40-character-sha1-thumbprint>'
+export REMASK_WINDOWS_TIMESTAMP_URL='http://timestamp.digicert.com' # optional
+REMASK_RELEASE=1 npm run package:windows
+```
+
+The GitHub workflow expects `WINDOWS_CERTIFICATE` (Base64 PFX),
+`WINDOWS_CERTIFICATE_PASSWORD`, and `WINDOWS_CERTIFICATE_THUMBPRINT` secrets.
+It imports the PFX before building and rejects installers whose Authenticode
+signature is not valid.
 
 ## Offline license public key
 
