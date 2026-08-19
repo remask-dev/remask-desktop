@@ -492,7 +492,7 @@ main {
 .audit-field section > span,
 .audit-field pre,
 .raw-part > header,
-.raw-part > section > span,
+.raw-part__section-heading > span,
 .raw-part pre {
   font-size: var(--font-caption);
 }
@@ -515,16 +515,17 @@ main {
 }
 
 .raw-part__copy {
-  width: 24px;
-  height: 24px;
+  width: 14px;
+  height: 14px;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   color: #71849a;
   background: transparent;
+  margin-left: auto;
   transition: color .14s, background-color .14s;
 }
 
@@ -543,7 +544,7 @@ main {
 .logs-view .detail-header code,
 .logs-view .detail-section--summary .property-grid dt,
 .logs-view .audit-field section > span,
-.logs-view .raw-part > section > span {
+.logs-view .raw-part__section-heading > span {
   font-size: 8px;
 }
 

@@ -123,11 +123,11 @@ function RawPart({ title, headers, body }: { title: string; headers?: Record<str
   const { notify } = useApp();
   const headersText = formatHeaders(headers);
   const bodyText = body || "—";
-  async function copyExchange() {
-    await navigator.clipboard.writeText(`${title}\n\nHeaders\n${headersText}\n\nBody\n${bodyText}`);
+  async function copyPart(content: string) {
+    await navigator.clipboard.writeText(content);
     notify(t("copied"));
   }
-	return <article className="raw-part"><header><strong>{title}</strong><button className="raw-part__copy" type="button" aria-label={t("copy")} title={t("copy")} onClick={() => void copyExchange()}><Copy size={12}/></button></header><section><span>Headers</span><pre>{headersText}</pre></section><section><span>Body</span><pre>{bodyText}</pre></section></article>;
+	return <article className="raw-part"><header><strong>{title}</strong></header><section><div className="raw-part__section-heading"><span>Headers</span><button className="raw-part__copy" type="button" aria-label={`${t("copy")} Headers`} title={t("copy")} onClick={() => void copyPart(headersText)}><Copy size={10}/></button></div><pre>{headersText}</pre></section><section><div className="raw-part__section-heading"><span>Body</span><button className="raw-part__copy" type="button" aria-label={`${t("copy")} Body`} title={t("copy")} onClick={() => void copyPart(bodyText)}><Copy size={10}/></button></div><pre>{bodyText}</pre></section></article>;
 }
 
 function formatHeaders(headers?: Record<string, string[]>) {

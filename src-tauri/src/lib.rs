@@ -63,6 +63,17 @@ fn get_gateway_settings(app: AppHandle) -> GatewayAddresses {
     load_gateway_addresses(&app)
 }
 
+#[tauri::command]
+fn open_profile_directory(app: AppHandle) -> Result<(), String> {
+    let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
+    let profiles_dir = home_dir.join(".remask").join("profiles");
+    std::fs::create_dir_all(&profiles_dir).map_err(|error| error.to_string())?;
+    #[allow(deprecated)]
+    app.shell()
+        .open(profiles_dir.to_string_lossy().into_owned(), None)
+        .map_err(|error| error.to_string())
+}
+
 fn save_gateway_addresses(
     app: &AppHandle,
     api_gateway: &str,
@@ -655,6 +666,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             append_client_log,
             get_gateway_settings,
+            open_profile_directory,
             start_core,
             stop_core,
             restart_core,

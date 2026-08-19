@@ -55,6 +55,11 @@ export function Shell() {
   useEffect(() => {
     if (core.status === "online") void queryClient.invalidateQueries({ queryKey: queryKeys.root });
   }, [core.status, queryClient]);
+  useEffect(() => {
+    const refreshProfiles = () => void queryClient.invalidateQueries({ queryKey: queryKeys.profiles });
+    window.addEventListener("focus", refreshProfiles);
+    return () => window.removeEventListener("focus", refreshProfiles);
+  }, [queryClient]);
   function toggleProtection(enabled: boolean) {
     if (connected) protection.mutate(enabled);
     else if (enabled && core.status === "offline") startProtection.mutate();
