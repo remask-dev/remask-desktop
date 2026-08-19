@@ -13,6 +13,7 @@ import (
 
 	"github.com/remask/remask-core/internal/audit"
 	"github.com/remask/remask-core/internal/gateway"
+	"github.com/remask/remask-core/internal/license"
 	"github.com/remask/remask-core/internal/mitm"
 	"github.com/remask/remask-core/internal/model"
 	"github.com/remask/remask-core/internal/modeldownload"
@@ -37,22 +38,25 @@ type Router struct {
 	audits     *audit.Store
 	rules      *pii.RuleDetector
 	authority  *mitm.Authority
+	licenses   *license.Manager
 	startedAt  time.Time
 }
 
-func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Registry, upstreams *upstream.Registry, proxyRules *proxyrule.Registry, models *model.Manager, operations *operation.Store, audits *audit.Store, authority *mitm.Authority, configuredRules ...*pii.RuleDetector) http.Handler {
+func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Registry, upstreams *upstream.Registry, proxyRules *proxyrule.Registry, models *model.Manager, operations *operation.Store, audits *audit.Store, authority *mitm.Authority, licenses *license.Manager, configuredRules ...*pii.RuleDetector) http.Handler {
 	rules := pii.NewRuleDetector()
 	if len(configuredRules) > 0 && configuredRules[0] != nil {
 		rules = configuredRules[0]
 	}
 	router := &Router{
-		logger: logger, pii: service, profiles: profiles, upstreams: upstreams, proxyRules: proxyRules, models: models, operations: operations, audits: audits, rules: rules, authority: authority,
+		logger: logger, pii: service, profiles: profiles, upstreams: upstreams, proxyRules: proxyRules, models: models, operations: operations, audits: audits, rules: rules, authority: authority, licenses: licenses,
 		startedAt: time.Now().UTC(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", router.health)
 	mux.HandleFunc("GET /api/v1/ready", router.ready)
 	mux.HandleFunc("GET /api/v1/version", router.version)
+	mux.HandleFunc("GET /api/v1/license", router.getLicense)
+	mux.HandleFunc("POST /api/v1/license/import", router.importLicense)
 	mux.HandleFunc("POST /api/v1/detect", router.detect)
 	mux.HandleFunc("POST /api/v1/redact", router.redact)
 	mux.HandleFunc("POST /api/v1/restore", router.restore)
@@ -90,6 +94,27 @@ func NewRouter(logger *log.Logger, service *pii.Service, profiles *profile.Regis
 	mux.HandleFunc("GET /api/v1/policy", router.getPolicy)
 	mux.HandleFunc("PUT /api/v1/policy", router.putPolicy)
 	return requestMiddleware(logger, mux)
+}
+
+func (r *Router) getLicense(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, r.licenses.State())
+}
+
+type licenseImportRequest struct {
+	Content string `json:"content"`
+}
+
+func (r *Router) importLicense(w http.ResponseWriter, request *http.Request) {
+	var input licenseImportRequest
+	if !decodeJSON(w, request, &input) {
+		return
+	}
+	state, err := r.licenses.Import([]byte(input.Content))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, license.ErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
 }
 
 func (r *Router) getPolicy(w http.ResponseWriter, _ *http.Request) {
@@ -160,7 +185,7 @@ func (r *Router) proxyCAStatus(w http.ResponseWriter, _ *http.Request) {
 func (r *Router) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": "remask-core", "version": "0.1.0-dev", "api_version": "v1",
-		"capabilities":  []string{"pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.socks5", "proxy.selective-mitm", "proxy.rules.persisted", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
+		"capabilities":  []string{"license.offline", "license.device-bound", "pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.socks5", "proxy.selective-mitm", "proxy.rules.persisted", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
 		"model_runtime": r.models.RuntimeStatus(),
 	})
 }

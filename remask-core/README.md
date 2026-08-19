@@ -50,6 +50,26 @@ codex
 
 Upstream 配置、规则、审计设置和安全日志默认统一存放在用户 Home 的 `~/.remask` 隐藏目录，可通过 `--data-dir` 或 `REMASK_DATA_DIR` 指定。持久化数据统一使用 SQLite 数据库 `remask.db`，当前用于请求日志，后续可扩展其他本地数据；普通模式下审计日志不会记录 Header、URL 查询参数或实体原文，只保存首尾保留的安全打码预览（如 `138***000`）、实际发送给上游的标签文本、实体标识与模型置信度。正则规则为确定性匹配，命中置信度固定为 `1.0`。普通规则使用 `<MASK_大写规则ID:四位码>`，模型继续使用 `<实体类型:四位码>`；实体类型开关只控制模型输出，普通规则由各自开关控制。
 
+## 离线授权
+
+Core 从操作系统安装标识派生应用专用设备 ID，并在数据目录保存 `remask.license`。原始系统标识不会通过 API 返回或写入日志。授权文件使用 Ed25519 签名；客户端只包含公钥，私钥必须保存在独立的签发环境。当前授权状态仅用于设置页展示和导入，不限制 Core、API 网关或代理功能。
+
+开发环境可以生成密钥和测试授权：
+
+```bash
+go run ./cmd/remask-license keygen --private-key /secure/path/remask-license-key.pem
+
+go run ./cmd/remask-license issue \
+  --private-key /secure/path/remask-license-key.pem \
+  --key-id prod-v1 \
+  --device-id RMK1-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX \
+  --email customer@example.com \
+  --valid-for 8760h \
+  --output /tmp/remask.license
+```
+
+`keygen` 会将 Base64 公钥打印到标准输出。正式校验公钥保存在私有 Go 源码中并自动编译进 Core；`REMASK_LICENSE_PUBLIC_KEY` 和 `REMASK_LICENSE_KEY_ID` 仅用于受控的公钥轮换构建。源码或编译时内置的公钥优先且不能被运行时环境变量覆盖。任何私钥文件都不得放入仓库、安装包或构建日志。
+
 设置中的 `debug` 字段默认关闭。开启后，调试请求会在桌面端日志详情页显示完整 URL、Header、请求体和返回体（包括已经还原给客户端的响应）；这些内容可能包含敏感信息，仅建议临时开启并在排障后关闭。该字段保留在设置 API 中，但桌面端不提供开关入口。
 
 实体识别默认使用 `patrickmn/go-cache` 进程内缓存，按输入文本的 SHA-256 摘要保存识别结果；缓存值只保留实体类型、位置和置信度等结构信息，不保存实体原文，命中时根据当前输入恢复。缓存命中会续期，过期项由后台清理。可通过 `PUT /api/v1/settings` 的 `audit.entity_cache_enabled` 和 `audit.entity_cache_ttl_seconds` 配置开关与过期时间（默认开启、900 秒，允许 1–86400 秒）。内存缓存不会写入磁盘。

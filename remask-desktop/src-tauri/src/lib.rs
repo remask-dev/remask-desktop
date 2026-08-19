@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Write;
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -15,6 +15,8 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+const DEFAULT_PURCHASE_URL: &str = "https://remask.app/buy";
+
 mod system_integration;
 
 /// True once the user asked the app to quit from the tray. Closing the window
@@ -27,6 +29,8 @@ struct CoreProcess(Mutex<Option<ManagedCoreProcess>>);
 struct GatewayAddresses {
     api_gateway: String,
     http_proxy: String,
+    #[serde(default)]
+    allow_lan: bool,
 }
 
 impl Default for GatewayAddresses {
@@ -34,6 +38,7 @@ impl Default for GatewayAddresses {
         Self {
             api_gateway: "127.0.0.1:17681".to_string(),
             http_proxy: "127.0.0.1:17682".to_string(),
+            allow_lan: false,
         }
     }
 }
@@ -53,10 +58,16 @@ fn load_gateway_addresses(app: &AppHandle) -> GatewayAddresses {
         .unwrap_or_default()
 }
 
+#[tauri::command]
+fn get_gateway_settings(app: AppHandle) -> GatewayAddresses {
+    load_gateway_addresses(&app)
+}
+
 fn save_gateway_addresses(
     app: &AppHandle,
     api_gateway: &str,
     http_proxy: &str,
+    allow_lan: bool,
 ) -> Result<(), String> {
     let path = gateway_addresses_path(app)?;
     if let Some(directory) = path.parent() {
@@ -65,6 +76,7 @@ fn save_gateway_addresses(
     let data = serde_json::to_vec_pretty(&GatewayAddresses {
         api_gateway: api_gateway.to_string(),
         http_proxy: http_proxy.to_string(),
+        allow_lan,
     })
     .map_err(|error| error.to_string())?;
     let temporary = path.with_extension("json.tmp");
@@ -215,15 +227,18 @@ fn start_core(
     address: String,
     proxy_address: String,
     forward_proxy_address: String,
+    allow_lan: Option<bool>,
 ) -> Result<(), String> {
+    let allow_lan = allow_lan.unwrap_or_else(|| load_gateway_addresses(&app).allow_lan);
     spawn_core(
         &app,
         state.inner(),
         &address,
         &proxy_address,
         &forward_proxy_address,
+        allow_lan,
     )?;
-    save_gateway_addresses(&app, &proxy_address, &forward_proxy_address)
+    save_gateway_addresses(&app, &proxy_address, &forward_proxy_address, allow_lan)
 }
 
 fn spawn_core(
@@ -232,40 +247,10 @@ fn spawn_core(
     address: &str,
     proxy_address: &str,
     forward_proxy_address: &str,
+    allow_lan: bool,
 ) -> Result<(), String> {
-    let listen_address: SocketAddr = address
-        .parse()
-        .map_err(|_| "core address must be an IP address and port")?;
-    if !listen_address.ip().is_loopback() || listen_address.port() == 0 {
-        return Err("desktop core must listen on a loopback address and non-zero port".to_string());
-    }
-    let proxy_listen_address: SocketAddr = proxy_address
-        .parse()
-        .map_err(|_| "proxy address must be an IP address and port")?;
-    if !proxy_listen_address.ip().is_loopback() || proxy_listen_address.port() == 0 {
-        return Err(
-            "desktop proxy must listen on a loopback address and non-zero port".to_string(),
-        );
-    }
-    if proxy_listen_address == listen_address {
-        return Err("core and proxy addresses must use different ports".to_string());
-    }
-    let forward_proxy_listen_address: SocketAddr = forward_proxy_address
-        .parse()
-        .map_err(|_| "proxy gateway address must be an IP address and port")?;
-    if !forward_proxy_listen_address.ip().is_loopback() || forward_proxy_listen_address.port() == 0
-    {
-        return Err(
-            "desktop proxy gateway must listen on a loopback address and non-zero port".to_string(),
-        );
-    }
-    if forward_proxy_listen_address == listen_address
-        || forward_proxy_listen_address == proxy_listen_address
-    {
-        return Err(
-            "core, API gateway, and proxy gateway addresses must use different ports".to_string(),
-        );
-    }
+    let [listen_address, proxy_listen_address, forward_proxy_listen_address] =
+        resolve_core_addresses(address, proxy_address, forward_proxy_address, allow_lan)?;
 
     let mut process = state.0.lock().map_err(|_| "core process lock poisoned")?;
     if process.is_some() {
@@ -367,6 +352,56 @@ fn spawn_core(
     Ok(())
 }
 
+fn resolve_core_addresses(
+    address: &str,
+    proxy_address: &str,
+    forward_proxy_address: &str,
+    allow_lan: bool,
+) -> Result<[SocketAddr; 3], String> {
+    let listen_address: SocketAddr = address
+        .parse()
+        .map_err(|_| "core address must be an IP address and port")?;
+    if !listen_address.ip().is_loopback() || listen_address.port() == 0 {
+        return Err("desktop core must listen on a loopback address and non-zero port".to_string());
+    }
+    let mut proxy_listen_address: SocketAddr = proxy_address
+        .parse()
+        .map_err(|_| "proxy address must be an IP address and port")?;
+    if !proxy_listen_address.ip().is_loopback() || proxy_listen_address.port() == 0 {
+        return Err(
+            "desktop proxy must use a loopback address and non-zero port in its configuration"
+                .to_string(),
+        );
+    }
+    let mut forward_proxy_listen_address: SocketAddr = forward_proxy_address
+        .parse()
+        .map_err(|_| "proxy gateway address must be an IP address and port")?;
+    if !forward_proxy_listen_address.ip().is_loopback() || forward_proxy_listen_address.port() == 0
+    {
+        return Err(
+            "desktop proxy gateway must use a loopback address and non-zero port in its configuration"
+                .to_string(),
+        );
+    }
+    if listen_address.port() == proxy_listen_address.port()
+        || listen_address.port() == forward_proxy_listen_address.port()
+        || proxy_listen_address.port() == forward_proxy_listen_address.port()
+    {
+        return Err(
+            "core, API gateway, and proxy gateway addresses must use different ports".to_string(),
+        );
+    }
+    if allow_lan {
+        proxy_listen_address.set_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        forward_proxy_listen_address.set_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    }
+    Ok([
+        listen_address,
+        proxy_listen_address,
+        forward_proxy_listen_address,
+    ])
+}
+
 fn find_runtime_library(resource_dir: &Path) -> Option<PathBuf> {
     let filename = if cfg!(target_os = "macos") {
         "libonnxruntime.dylib"
@@ -417,17 +452,12 @@ fn restart_core(
     address: String,
     proxy_address: String,
     forward_proxy_address: String,
+    allow_lan: Option<bool>,
 ) -> Result<(), String> {
+    let allow_lan = allow_lan.unwrap_or_else(|| load_gateway_addresses(&app).allow_lan);
     // Validate the values before stopping the currently healthy Core.
-    let addresses = [
-        address.parse::<SocketAddr>(),
-        proxy_address.parse::<SocketAddr>(),
-        forward_proxy_address.parse::<SocketAddr>(),
-    ];
-    let addresses = addresses
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "core addresses must be IP addresses and ports".to_string())?;
+    let addresses =
+        resolve_core_addresses(&address, &proxy_address, &forward_proxy_address, allow_lan)?;
 
     if stop_core_process(state.inner())? {
         wait_for_ports_to_close(&addresses);
@@ -438,8 +468,9 @@ fn restart_core(
         &address,
         &proxy_address,
         &forward_proxy_address,
+        allow_lan,
     )?;
-    save_gateway_addresses(&app, &proxy_address, &forward_proxy_address)
+    save_gateway_addresses(&app, &proxy_address, &forward_proxy_address, allow_lan)
 }
 
 #[tauri::command]
@@ -492,6 +523,25 @@ fn launch_preset_with_proxy(
     forward_proxy_address: String,
 ) -> Result<(), String> {
     system_integration::launch_preset(&app, &preset, &forward_proxy_address)
+}
+
+#[tauri::command]
+fn open_purchase_page(app: AppHandle, device_id: String) -> Result<(), String> {
+    if !device_id.starts_with("RMK1-")
+        || device_id.len() > 64
+        || !device_id.chars().all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '-'
+        })
+    {
+        return Err("invalid Remask device ID".to_string());
+    }
+    let base_url = option_env!("REMASK_PURCHASE_URL").unwrap_or(DEFAULT_PURCHASE_URL);
+    let separator = if base_url.contains('?') { '&' } else { '?' };
+    let url = format!("{base_url}{separator}product=remask-desktop&device_id={device_id}");
+    #[allow(deprecated)]
+    app.shell()
+        .open(url, None)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -584,6 +634,7 @@ pub fn run() {
                     "127.0.0.1:17680",
                     &gateway_addresses.api_gateway,
                     &gateway_addresses.http_proxy,
+                    gateway_addresses.allow_lan,
                 ) {
                     eprintln!("failed to start remask-core: {error}");
                 }
@@ -603,6 +654,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             append_client_log,
+            get_gateway_settings,
             start_core,
             stop_core,
             restart_core,
@@ -611,7 +663,8 @@ pub fn run() {
             uninstall_system_certificate,
             launch_ai_client,
             launch_app_with_proxy,
-            launch_preset_with_proxy
+            launch_preset_with_proxy,
+            open_purchase_page
         ])
         .build(tauri::generate_context!())
         .expect("error while building remask-desktop")
@@ -633,6 +686,52 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_core_addresses;
+
+    #[test]
+    fn gateway_addresses_only_leave_loopback_when_lan_access_is_enabled() {
+        let local = resolve_core_addresses(
+            "127.0.0.1:17680",
+            "127.0.0.1:17681",
+            "127.0.0.1:17682",
+            false,
+        )
+        .unwrap();
+        assert!(local.iter().all(|address| address.ip().is_loopback()));
+
+        let lan = resolve_core_addresses(
+            "127.0.0.1:17680",
+            "127.0.0.1:17681",
+            "127.0.0.1:17682",
+            true,
+        )
+        .unwrap();
+        assert!(lan[0].ip().is_loopback());
+        assert!(lan[1].ip().is_unspecified());
+        assert!(lan[2].ip().is_unspecified());
+    }
+
+    #[test]
+    fn gateway_configuration_rejects_external_addresses_and_duplicate_ports() {
+        assert!(resolve_core_addresses(
+            "127.0.0.1:17680",
+            "192.168.1.10:17681",
+            "127.0.0.1:17682",
+            true,
+        )
+        .is_err());
+        assert!(resolve_core_addresses(
+            "127.0.0.1:17680",
+            "127.0.0.1:17680",
+            "127.0.0.1:17682",
+            false,
+        )
+        .is_err());
     }
 }
 

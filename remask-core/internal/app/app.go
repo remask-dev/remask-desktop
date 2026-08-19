@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/remask/remask-core/internal/audit"
+	"github.com/remask/remask-core/internal/deviceid"
 	"github.com/remask/remask-core/internal/forwardproxy"
 	"github.com/remask/remask-core/internal/gateway"
 	"github.com/remask/remask-core/internal/httpapi"
+	"github.com/remask/remask-core/internal/license"
 	"github.com/remask/remask-core/internal/mitm"
 	"github.com/remask/remask-core/internal/model"
 	"github.com/remask/remask-core/internal/operation"
@@ -48,9 +50,25 @@ type Options struct {
 	EntityCacheBackend     string
 	EntityCacheRedisURL    string
 	EntityCacheRedisPrefix string
+	LicenseVerifier        *license.Verifier
+	DeviceIDResolver       func() (string, error)
 }
 
 func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
+	verifier := options.LicenseVerifier
+	if verifier == nil {
+		var err error
+		verifier, err = license.ConfiguredVerifier()
+		if err != nil {
+			return nil, err
+		}
+	}
+	resolveDeviceID := options.DeviceIDResolver
+	if resolveDeviceID == nil {
+		resolveDeviceID = deviceid.ID
+	}
+	deviceID, deviceIDErr := resolveDeviceID()
+	licenses := license.NewManager(options.DataDir, deviceID, deviceIDErr, verifier)
 	// Entity label suffixes are deterministic from the entity itself and do not
 	// depend on a machine or device identifier.
 	store, err := scope.NewMemoryStore(15 * time.Minute)
@@ -143,7 +161,7 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	proxy := gateway.New(logger, upstreams, profiles, service, audits, options.HTTPClient, rules)
 	forward := forwardproxy.New(logger, proxyRules, proxy, authority)
 
-	handler := httpapi.NewRouter(logger, service, profiles, upstreams, proxyRules, models, operations, audits, authority, rules)
+	handler := httpapi.NewRouter(logger, service, profiles, upstreams, proxyRules, models, operations, audits, authority, licenses, rules)
 	return &App{
 		handler: handler, proxyHandler: httpapi.NewProxyRouter(logger, proxy),
 		forwardProxyHandler: forward, proxyAuthority: authority,

@@ -104,3 +104,22 @@ Use `REMASK_ARCH=x64` or `REMASK_ARCH=arm64`. A non-native architecture also
 requires `REMASK_GO_CC` to point to a suitable cgo cross compiler. Developer
 packages are unsigned by default. Set `REMASK_SIGN=1` only after configuring
 the platform signing identity or Tauri signing command.
+
+## Offline license public key
+
+The Base64 Ed25519 verification key and its stable identifier are stored in
+the private Go source and are compiled into the sidecar automatically. The
+corresponding private key must remain in the license-issuing environment and
+must never be made available to the desktop build.
+
+The environment variables below are optional and are intended only for a
+controlled public-key rotation build:
+
+```bash
+export REMASK_LICENSE_PUBLIC_KEY='<base64-ed25519-public-key>'
+export REMASK_LICENSE_KEY_ID='prod-v1'
+```
+
+`REMASK_PURCHASE_URL` may be set while compiling the Tauri application to
+replace the default purchase page. The desktop command appends only the fixed
+product name and the validated Remask device ID.

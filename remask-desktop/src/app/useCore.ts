@@ -11,6 +11,7 @@ import type { AuditStats, AuditStatsRange, PolicySettings, RuntimeStatus } from 
 export const queryKeys = {
   root: ["core"] as const,
   version: ["core", "version"] as const,
+  license: ["core", "license"] as const,
   policy: ["core", "policy"] as const,
   proxyCA: ["core", "proxy-ca"] as const,
   profiles: ["core", "profiles"] as const,
@@ -146,10 +147,11 @@ export function useSettingsData() {
   const online = useCoreOnline();
   const settings = useQuery({ queryKey: queryKeys.settings, queryFn: coreApi.settings, enabled: online });
   const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online });
-  const result = combineQueries({ settings, policy });
+  const license = useQuery({ queryKey: queryKeys.license, queryFn: coreApi.license, enabled: online, refetchInterval: online ? 60_000 : false });
+  const result = combineQueries({ settings, policy, license });
   // Editable state must not be initialized from another observer's placeholder
   // data. Once mounted, SettingsContent intentionally owns its local draft.
-  return { ...result, isPending: result.isPending || !settings.isFetched || !policy.isFetched };
+  return { ...result, isPending: result.isPending || !settings.isFetched || !policy.isFetched || !license.isFetched };
 }
 
 type QueryResult = { isPending: boolean; error: unknown; isError: boolean; refetch: () => Promise<unknown> };
