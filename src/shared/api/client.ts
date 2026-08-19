@@ -1,4 +1,4 @@
-import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, ProxyRule, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
+import type { ActiveModel, AuditEntity, AuditField, AuditLog, AuditLogSummary, AuditSettings, AuditStats, AuditStatsRange, DailyStat, DebugExchange, EntityTypeConfig, LicenseState, LicenseStatus, ModelDownloadRequest, ModelManifest, ModelPackage, Operation, PIIEntity, PolicySettings, Profile, ProxyCAStatus, ProxyRule, RedactResult, RuleConfig, RuntimeStatus, TokenUsage, Upstream, VersionResponse } from "./types";
 
 const trim = (value: string) => value.trim().replace(/\/$/, "");
 export const connection = {
@@ -16,8 +16,10 @@ export const connection = {
   },
   forwardProxy: () => `http://127.0.0.1:${connection.forwardProxyPort()}`,
   socksProxy: () => `socks5h://127.0.0.1:${connection.forwardProxyPort()}`,
+  allowLan: () => localStorage.getItem("remask.allowLan") === "true",
   saveGatewayPort(port: number) { localStorage.setItem("remask.gatewayPort", String(port)); },
   saveForwardProxyPort(port: number) { localStorage.setItem("remask.forwardProxyPort", String(port)); },
+  saveAllowLan(allow: boolean) { localStorage.setItem("remask.allowLan", String(allow)); },
 };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -165,6 +167,17 @@ function normalizeAuditSettings(value: unknown): AuditSettings {
   };
 }
 
+function normalizeLicense(value: unknown): LicenseState {
+  const raw = isRecord(value) ? value : {};
+  const statuses: LicenseStatus[] = ["missing", "valid", "expired", "not_yet_valid", "device_mismatch", "invalid", "key_unconfigured", "device_unavailable"];
+  const status = statuses.includes(raw.status as LicenseStatus) ? raw.status as LicenseStatus : "invalid";
+  return {
+    device_id: text(raw.device_id), status, license_id: optionalText(raw.license_id), edition: optionalText(raw.edition), email: optionalText(raw.email),
+    issued_at: optionalText(raw.issued_at), not_before: optionalText(raw.not_before), expires_at: optionalText(raw.expires_at),
+    features: stringList(raw.features), code: optionalText(raw.code),
+  };
+}
+
 function normalizeStats(value: unknown): AuditStats {
   const raw = isRecord(value) ? value : {};
   const daily: DailyStat[] = records(raw.daily).map(item => ({ date: text(item.date), requests: number(item.requests), entities: number(item.entities) }));
@@ -230,6 +243,8 @@ export const coreApi = {
   // Keep transport calls small and composable. Page hooks decide which of these
   // resources are needed; there is intentionally no all-pages bootstrap call.
   version: () => request<VersionResponse>("/api/v1/version"),
+  license: async () => normalizeLicense(await request<unknown>("/api/v1/license")),
+  importLicense: async (content: string) => normalizeLicense(await request<unknown>("/api/v1/license/import", { method: "POST", body: JSON.stringify({ content }) })),
   proxyCA: async () => {
     const raw = await request<unknown>("/api/v1/proxy/ca");
     const value = isRecord(raw) ? raw : {};

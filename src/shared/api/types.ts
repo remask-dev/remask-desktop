@@ -1,5 +1,7 @@
 export interface RuntimeStatus { available: boolean; name: string; provider?: string; configured_provider?: string; provider_config_pending?: boolean; max_inference_tokens?: number; configured_max_inference_tokens?: number; inference_config_pending?: boolean }
 export interface VersionResponse { name: string; version: string; api_version: string; capabilities: string[]; model_runtime: RuntimeStatus }
+export type LicenseStatus = "missing" | "valid" | "expired" | "not_yet_valid" | "device_mismatch" | "invalid" | "key_unconfigured" | "device_unavailable";
+export interface LicenseState { device_id: string; status: LicenseStatus; license_id?: string; edition?: string; email?: string; issued_at?: string; not_before?: string; expires_at?: string; features?: string[]; code?: string }
 export interface ProxyCAStatus { ready: boolean; certificate_path?: string; fingerprint_sha256: string }
 export interface Profile { id: string; name: string; operations: unknown[]; header_templates?: Record<string, string> }
 export interface Upstream { id: string; base_url: string; profile_id: string; credential_mode: "passthrough" | "managed"; api_key?: string; header_templates?: Record<string, string>; enabled: boolean }

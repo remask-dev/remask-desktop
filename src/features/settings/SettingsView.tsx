@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
 import { connection, coreApi } from "../../shared/api/client";
-import type { AuditSettings, PolicySettings } from "../../shared/api/types";
+import type { AuditSettings, LicenseState, LicenseStatus, PolicySettings } from "../../shared/api/types";
 import { useApp } from "../../app/AppContext";
 import { queryKeys, useSettingsData } from "../../app/useCore";
 import { useI18n } from "../../shared/i18n/I18n";
@@ -16,12 +16,13 @@ import { Switch } from "../../shared/ui/Switch";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 
-type SettingsData = { settings: AuditSettings; policy: PolicySettings };
+type SettingsData = { settings: AuditSettings; policy: PolicySettings; license: LicenseState };
+type DesktopGatewaySettings = { api_gateway: string; http_proxy: string; allow_lan: boolean };
 
 export function SettingsView() {
   const query = useSettingsData();
-  if (query.isPending || !query.settings || !query.policy) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
-  return <SettingsContent data={{ settings: query.settings, policy: query.policy }}/>;
+  if (query.isPending || !query.settings || !query.policy || !query.license) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
+  return <SettingsContent data={{ settings: query.settings, policy: query.policy, license: query.license }}/>;
 }
 
 function SettingsContent({ data }: { data: SettingsData }) {
@@ -36,10 +37,36 @@ function SettingsContent({ data }: { data: SettingsData }) {
   const [autostartReady, setAutostartReady] = useState(false);
   const [apiGatewayPort, setAPIGatewayPort] = useState(connection.proxyPort());
   const [httpProxyPort, setHTTPProxyPort] = useState(connection.forwardProxyPort());
+  const [allowLan, setAllowLan] = useState(connection.allowLan());
+  const [gatewaySettingsReady, setGatewaySettingsReady] = useState(!inTauri);
+  const [license, setLicense] = useState<LicenseState>(data.license);
 
   useEffect(() => {
     if (!inTauri) return;
     isAutostartEnabled().then(setAutostart).catch(() => {}).finally(() => setAutostartReady(true));
+  }, []);
+
+  useEffect(() => setLicense(data.license), [data.license]);
+
+  useEffect(() => {
+    if (!inTauri) return;
+    invoke<DesktopGatewaySettings>("get_gateway_settings")
+      .then(saved => {
+        const apiPort = Number(saved.api_gateway.split(":").at(-1));
+        const httpPort = Number(saved.http_proxy.split(":").at(-1));
+        if (Number.isInteger(apiPort) && apiPort > 0) {
+          setAPIGatewayPort(apiPort);
+          connection.saveGatewayPort(apiPort);
+        }
+        if (Number.isInteger(httpPort) && httpPort > 0) {
+          setHTTPProxyPort(httpPort);
+          connection.saveForwardProxyPort(httpPort);
+        }
+        setAllowLan(saved.allow_lan);
+        connection.saveAllowLan(saved.allow_lan);
+      })
+      .catch(() => {})
+      .finally(() => setGatewaySettingsReady(true));
   }, []);
 
   async function toggleAutostart(next: boolean) {
@@ -63,34 +90,46 @@ function SettingsContent({ data }: { data: SettingsData }) {
     onError: error => { setAudit(data.settings); notify(String(error)); },
   });
   const clearMutation = useMutation({ mutationFn: coreApi.clearLogs, onSuccess: () => { setClear(false); qc.invalidateQueries({ queryKey: ["core", "audit-logs"] }); } });
-  const saveGatewayPorts = useMutation({
-    mutationFn: async ({ apiPort, httpPort }: { apiPort: number; httpPort: number }) => {
+  const saveGatewaySettings = useMutation({
+    mutationFn: async ({ apiPort, httpPort, allowLan: nextAllowLan }: { apiPort: number; httpPort: number; allowLan: boolean }) => {
       const corePort = Number(new URL(connection.core()).port) || 80;
       if (![apiPort, httpPort].every(port => Number.isInteger(port) && port >= 1 && port <= 65535) || apiPort === httpPort || apiPort === corePort || httpPort === corePort) throw new Error(t("proxyGatewayPortInvalid"));
       const previousAPI = connection.proxyPort();
       const previousHTTP = connection.forwardProxyPort();
-      if (apiPort === previousAPI && httpPort === previousHTTP) return { restarted: false, apiPort, httpPort };
+      const previousAllowLan = connection.allowLan();
+      if (apiPort === previousAPI && httpPort === previousHTTP && nextAllowLan === previousAllowLan) return { restarted: false, apiPort, httpPort, allowLan: nextAllowLan };
       if (inTauri) {
         try {
-          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${apiPort}`, forwardProxyAddress: `127.0.0.1:${httpPort}` });
+          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${apiPort}`, forwardProxyAddress: `127.0.0.1:${httpPort}`, allowLan: nextAllowLan });
         } catch (error) {
-          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${previousAPI}`, forwardProxyAddress: `127.0.0.1:${previousHTTP}` });
+          await invoke("restart_core", { address: new URL(connection.core()).host, proxyAddress: `127.0.0.1:${previousAPI}`, forwardProxyAddress: `127.0.0.1:${previousHTTP}`, allowLan: previousAllowLan });
           throw error;
         }
       }
-      return { restarted: inTauri, apiPort, httpPort };
+      return { restarted: inTauri, apiPort, httpPort, allowLan: nextAllowLan };
     },
-    onSuccess: ({ restarted, apiPort, httpPort }) => {
+    onSuccess: ({ restarted, apiPort, httpPort, allowLan: savedAllowLan }) => {
       connection.saveGatewayPort(apiPort);
       connection.saveForwardProxyPort(httpPort);
+      connection.saveAllowLan(savedAllowLan);
       window.setTimeout(() => void qc.invalidateQueries({ queryKey: queryKeys.root }), restarted ? 700 : 0);
       notify(t(restarted ? "settingsSavedRestarted" : "settingsSaved"));
     },
     onError: error => {
       setAPIGatewayPort(connection.proxyPort());
       setHTTPProxyPort(connection.forwardProxyPort());
+      setAllowLan(connection.allowLan());
       notify(String(error));
     },
+  });
+  const importLicense = useMutation({
+    mutationFn: coreApi.importLicense,
+    onSuccess: result => {
+      setLicense(result);
+      qc.setQueryData(queryKeys.license, result);
+      notify(t("licenseImported"));
+    },
+    onError: error => notify(String(error)),
   });
 
   function updatePolicy(patch: Partial<PolicySettings>) {
@@ -104,7 +143,60 @@ function SettingsContent({ data }: { data: SettingsData }) {
     saveAudit.mutate(next);
   }
   function applyHFBaseURL() { const next = { ...audit, hf_base_url: hfBaseURL.trim() }; setAudit(next); saveAudit.mutate(next); }
-  function applyGatewayPorts() { if (!saveGatewayPorts.isPending) saveGatewayPorts.mutate({ apiPort: apiGatewayPort, httpPort: httpProxyPort }); }
+  function applyGatewaySettings(nextAllowLan = allowLan) { if (!saveGatewaySettings.isPending) saveGatewaySettings.mutate({ apiPort: apiGatewayPort, httpPort: httpProxyPort, allowLan: nextAllowLan }); }
+  function toggleAllowLan(next: boolean) { setAllowLan(next); applyGatewaySettings(next); }
+  async function copyDeviceID() {
+    await navigator.clipboard.writeText(license.device_id);
+    notify(t("deviceIdCopied"));
+  }
+  async function selectLicense(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    if (file.size < 1 || file.size > 64 * 1024) {
+      notify(t("licenseFileSizeInvalid"));
+      return;
+    }
+    try {
+      importLicense.mutate(await file.text());
+    } catch (error) {
+      notify(String(error));
+    }
+  }
+  async function openPurchase() {
+    if (!license.device_id) return;
+    try {
+      if (inTauri) {
+        await invoke("open_purchase_page", { deviceId: license.device_id });
+      } else {
+        const url = new URL(import.meta.env.VITE_PURCHASE_URL || "https://remask.app/buy");
+        url.searchParams.set("product", "remask-desktop");
+        url.searchParams.set("device_id", license.device_id);
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      notify(String(error));
+    }
+  }
+
+  const licenseStatusLabels: Record<LicenseStatus, string> = {
+    missing: t("licenseMissing"), valid: t("licenseValid"), expired: t("licenseExpired"),
+    not_yet_valid: t("licenseNotYetValid"), device_mismatch: t("licenseDeviceMismatch"),
+    invalid: t("licenseInvalid"), key_unconfigured: t("licenseKeyUnconfigured"),
+    device_unavailable: t("licenseDeviceUnavailable"),
+  };
+  const licenseDate = license.expires_at ? new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium" }).format(new Date(license.expires_at)) : t("notAvailable");
+  const licenseSection = <SettingsSection tone="license" title={t("licenseSettings")} subtitle={t("licenseSettingsSub")}>
+    <SettingRow label={t("licenseStatus")} description={license.status === "valid" && license.edition ? `${licenseStatusLabels[license.status]} · ${license.edition}` : licenseStatusLabels[license.status]}><span className={`license-status license-status--${license.status}`}>{licenseStatusLabels[license.status]}</span></SettingRow>
+    <SettingRow label={t("deviceId")} description={t("deviceIdSub")}><button className="license-device" type="button" disabled={!license.device_id} onClick={() => void copyDeviceID()}><code>{license.device_id || t("notAvailable")}</code><small>{t("copy")}</small></button></SettingRow>
+    {license.email ? <SettingRow label={t("licenseEmail")} description={t("licenseEmailSub")}><span className="license-email">{license.email}</span></SettingRow> : null}
+    <SettingRow last label={t("licenseExpiresAt")} description={t("licenseExpiresAtSub")}><time className="license-expiry" dateTime={license.expires_at}>{licenseDate}</time></SettingRow>
+    <div className="settings-actions license-actions">
+      <label className={`button button--secondary license-action-button ${importLicense.isPending ? "license-import--disabled" : ""}`}><input type="file" accept=".license,application/json" disabled={importLicense.isPending} onChange={event => void selectLicense(event)}/>{importLicense.isPending ? t("licenseImporting") : t("importLicense")}</label>
+      <Button className="license-action-button" variant="secondary" disabled={!license.device_id} onClick={() => void openPurchase()}>{t("buyLicense")}</Button>
+    </div>
+  </SettingsSection>;
 
   return <div className="settings-page"><div className="settings-grid">
     <SettingsSection tone="interface" title={t("applicationSettings")} subtitle={t("applicationSettingsSub")}>
@@ -112,8 +204,9 @@ function SettingsContent({ data }: { data: SettingsData }) {
       {inTauri && <SettingRow last label={t("autostart")} description={t("autostartSub")}><Switch ariaLabel={t("autostart")} disabled={!autostartReady} checked={autostart} onCheckedChange={toggleAutostart}/></SettingRow>}
     </SettingsSection>
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
-      <SettingRow label={t("apiGatewayPort")} description={t("apiGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} value={apiGatewayPort} onChange={event => setAPIGatewayPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
-      <SettingRow last label={t("proxyGatewayPort")} description={t("proxyGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={applyGatewayPorts} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
+      <SettingRow label={t("apiGatewayPort")} description={t("apiGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} value={apiGatewayPort} onChange={event => setAPIGatewayPort(Number(event.target.value))} onBlur={() => applyGatewaySettings()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
+      <SettingRow label={t("proxyGatewayPort")} description={t("proxyGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={() => applyGatewaySettings()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
+      <SettingRow last label={t("allowLanRequests")} description={t("allowLanRequestsSub")}><Switch ariaLabel={t("allowLanRequests")} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} checked={allowLan} onCheckedChange={toggleAllowLan}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="models" title={t("modelSettings")} subtitle={t("modelSettingsSub")}>
       <SettingRow label={t("hfMirror")} description={t("hfMirrorSub")}><Input className="settings-control" placeholder="https://huggingface.co" value={hfBaseURL} onChange={event => setHFBaseURL(event.target.value)} onBlur={applyHFBaseURL} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
@@ -131,6 +224,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
       <SettingRow last label={t("retention")} description={t("retentionSub")}><Select className="settings-control" value={String(audit.retention_days)} onValueChange={value => updateAudit({ retention_days: Number(value) })} options={[7, 30, 90, 180].map(value => ({ value: String(value), label: `${value} ${t("days")}` }))}/></SettingRow>
       <div className="settings-actions settings-actions--split"><Button variant="danger" onClick={() => setClear(true)}>{t("clearLogs")}</Button></div>
     </SettingsSection>
+    {licenseSection}
     <Dialog open={clear} title={t("confirmClear")} onClose={() => setClear(false)} footer={<><Button onClick={() => setClear(false)}>{t("cancel")}</Button><Button variant="danger" onClick={() => clearMutation.mutate()}>{t("confirm")}</Button></>}><p className="dialog-message">{t("clearLogs")}</p></Dialog>
   </div></div>;
 }

@@ -11,6 +11,8 @@ model_ids="${REMASK_MODEL_IDS:-openai-privacy-filter-q4f16}"
 go_cc="${REMASK_GO_CC:-${CC:-}}"
 runtime_target_dir="$tauri_dir/resources/onnxruntime"
 models_stage_dir="$tauri_dir/resources/models.stage"
+license_public_key="${REMASK_LICENSE_PUBLIC_KEY:-}"
+license_key_id="${REMASK_LICENSE_KEY_ID:-prod-v1}"
 
 if [[ ! "$target_triple" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "invalid TARGET_TRIPLE: $target_triple" >&2
@@ -72,6 +74,14 @@ if [[ -z "$runtime_library" || ! -f "$runtime_library" ]]; then
   echo "set REMASK_ONNXRUNTIME_LIBRARY to the platform ONNX Runtime shared library" >&2
   exit 1
 fi
+if [[ -n "$license_public_key" && ! "$license_public_key" =~ ^[A-Za-z0-9+/=_-]+$ ]]; then
+  echo "REMASK_LICENSE_PUBLIC_KEY must be a Base64 Ed25519 public key" >&2
+  exit 1
+fi
+if [[ ! "$license_key_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "REMASK_LICENSE_KEY_ID contains unsupported characters" >&2
+  exit 1
+fi
 
 mkdir -p "$tauri_dir/binaries" "$runtime_target_dir"
 rm -rf "$models_stage_dir"
@@ -83,7 +93,11 @@ mkdir -p "$models_stage_dir"
   if [[ -n "$go_cc" ]]; then
     go_build_env+=(CC="$go_cc")
   fi
-  env "${go_build_env[@]}" go build -tags onnxruntime -o "$sidecar_path" ./cmd/remask-core
+  go_build_args=(-tags onnxruntime -o "$sidecar_path")
+  if [[ -n "$license_public_key" ]]; then
+    go_build_args+=(-ldflags "-X github.com/remask/remask-core/internal/license.EmbeddedPublicKey=$license_public_key -X github.com/remask/remask-core/internal/license.EmbeddedKeyID=$license_key_id")
+  fi
+  env "${go_build_env[@]}" go build "${go_build_args[@]}" ./cmd/remask-core
 )
 
 old_ifs="$IFS"
