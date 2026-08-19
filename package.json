@@ -12,6 +12,7 @@
     "desktop:build": "bash scripts/package.sh current",
     "package:current": "bash scripts/package.sh current",
     "package:macos": "bash scripts/package.sh macos",
+    "release:macos": "bash scripts/release-macos.sh",
     "package:windows": "bash scripts/package.sh windows",
     "package:linux": "bash scripts/package.sh linux",
     "icons": "bash scripts/generate-icons.sh",
