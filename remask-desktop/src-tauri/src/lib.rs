@@ -512,11 +512,17 @@ pub fn run() {
             } else {
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                     .title("Remask")
-                    .inner_size(1040.0, 650.0)
-                    .min_inner_size(640.0, 560.0)
+                    .inner_size(1000.0, 680.0)
+                    .min_inner_size(794.0, 600.0)
                     .visible(false)
                     .build()?
             };
+
+            // macOS may restore the last window frame instead of applying the
+            // configured minimum. Re-apply it at runtime so the overview fits.
+            window.set_min_size(Some(tauri::LogicalSize::new(794.0, 600.0)))?;
+            window.set_size(tauri::LogicalSize::new(1000.0, 680.0))?;
+            window.center()?;
 
             // System tray icon: left-click shows the window, the menu offers
             // show and a real quit (closing the window only hides to the tray).

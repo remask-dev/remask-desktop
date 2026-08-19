@@ -12,11 +12,11 @@ import type { MessageKey } from "../../shared/i18n/messages";
 export type QuickLaunchPreset = "claude-code" | "codex" | "codex-cli" | "terminal" | "browser";
 
 const launchOptions: Array<{ value: QuickLaunchPreset; label: MessageKey; icon: ReactNode }> = [
-  { value: "codex", label: "codexApp", icon: <AppWindow size={15}/> },
-  { value: "browser", label: "browserApp", icon: <Globe2 size={15}/> },
   { value: "claude-code", label: "claudeCode", icon: <Bot size={15}/> },
-  { value: "terminal", label: "terminalApp", icon: <SquareTerminal size={15}/> },
+  { value: "codex", label: "codexApp", icon: <AppWindow size={15}/> },
   { value: "codex-cli", label: "codexCLI", icon: <Terminal size={15}/> },
+  { value: "browser", label: "browserApp", icon: <Globe2 size={15}/> },
+  { value: "terminal", label: "terminalApp", icon: <SquareTerminal size={15}/> },
 ];
 
 export function TopbarQuickLaunch() {
