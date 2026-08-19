@@ -12,15 +12,14 @@ export interface ActiveModel { id: string; name: string; version: string; runtim
 export interface AuditEntity { type: string; replacement: string; masked?: string; confidence: number; sources?: string[] }
 export interface AuditField { path: string; original_masked: string; redacted: string; entities: AuditEntity[] | null }
 export interface TokenUsage { input: number; output: number; total: number; cached?: number }
-export interface DebugRequest { method: string; url: string; headers?: Record<string, string[]>; body?: string }
-export interface DebugResponse { status: number; headers?: Record<string, string[]>; body?: string }
-export interface DebugExchange { request: DebugRequest; response: DebugResponse }
+export interface RawRequest { method: string; url: string; headers?: Record<string, string[]>; body?: string }
+export interface RawResponse { status: number; headers?: Record<string, string[]>; body?: string }
 export interface AuditLogSummary { id: string; timestamp: string; upstream_id: string; profile_id: string; operation_id: string; model?: string; protection_mode?: "redacted" | "passthrough" | "disabled"; gateway_type: "api_gateway" | "proxy_gateway"; target_host?: string; method: string; path: string; status_code: number; duration_ms: number; streaming: boolean; request_bytes: number; response_bytes: number; entity_count: number; token_usage?: TokenUsage; error_code?: string }
-export interface AuditLog extends AuditLogSummary { fields?: AuditField[]; debug?: DebugExchange }
+export interface AuditLog extends AuditLogSummary { fields?: AuditField[]; raw_request?: RawRequest; raw_response?: RawResponse }
 export interface DailyStat { date: string; requests: number; entities: number }
 export type AuditStatsRange = "today" | "yesterday" | "7d" | "30d";
 export interface AuditStats { requests: number; entities: number; success_rate: number; average_latency_ms: number; streaming_requests: number; entity_types: Record<string, number>; daily: DailyStat[]; token_input: number; token_output: number; token_total: number; token_cached: number; tokens_per_minute: number; granularity?: "hour" | "day" }
-export interface AuditSettings { record_request_content: boolean; debug: boolean; retention_days: number; hf_base_url?: string; max_inference_tokens: number; inference_provider: "auto" | "cpu" | "gpu"; entity_cache_enabled: boolean; entity_cache_ttl_seconds: number }
+export interface AuditSettings { record_request_content: boolean; record_raw_request: boolean; retention_days: number; hf_base_url?: string; max_inference_tokens: number; inference_provider: "auto" | "cpu" | "gpu"; entity_cache_enabled: boolean; entity_cache_ttl_seconds: number }
 export interface ModelDownloadRequest { repo: string; revision?: string; variant?: string; id?: string; name?: string; base_url?: string }
 export interface ModelCatalogEntry { id: string; name: string; project_url: string; repo: string; revision: string; variant: string }
 export interface PIIEntity { type: string; replacement: string; confidence: number; sources: string[] }

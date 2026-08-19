@@ -220,7 +220,8 @@ function SettingsContent({ data }: { data: SettingsData }) {
       <SettingRow last label={t("entityCacheTTL")} description={t("entityCacheTTLSub")}><Select className="settings-control" value={String(audit.entity_cache_ttl_seconds || 900)} onValueChange={value => updateAudit({ entity_cache_ttl_seconds: Number(value) })} options={[60, 300, 900, 3600].map(value => ({ value: String(value), label: `${value < 3600 ? value / 60 + " min" : "1 h"}` }))}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="logs" title={t("audit")} subtitle={t("auditSub")}>
-      <SettingRow label={t("record")} description={t("recordSub")}><Switch ariaLabel={t("record")} disabled={saveAudit.isPending} checked={audit.record_request_content} onCheckedChange={record_request_content => updateAudit({ record_request_content })}/></SettingRow>
+      <SettingRow label={t("recordRedactedContent")} description={t("recordRedactedContentSub")}><Switch ariaLabel={t("recordRedactedContent")} disabled={saveAudit.isPending} checked={audit.record_request_content} onCheckedChange={record_request_content => updateAudit({ record_request_content })}/></SettingRow>
+	  <SettingRow label={t("recordRawRequest")} description={t("recordRawRequestSub")}><Switch ariaLabel={t("recordRawRequest")} disabled={saveAudit.isPending} checked={audit.record_raw_request} onCheckedChange={record_raw_request => updateAudit({ record_raw_request })}/></SettingRow>
       <SettingRow last label={t("retention")} description={t("retentionSub")}><Select className="settings-control" value={String(audit.retention_days)} onValueChange={value => updateAudit({ retention_days: Number(value) })} options={[7, 30, 90, 180].map(value => ({ value: String(value), label: `${value} ${t("days")}` }))}/></SettingRow>
       <div className="settings-actions settings-actions--split"><Button variant="danger" onClick={() => setClear(true)}>{t("clearLogs")}</Button></div>
     </SettingsSection>

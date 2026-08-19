@@ -96,7 +96,7 @@ function LogDetail({ item }: { item: AuditLog }) {
         <div><dt>{t("tokenUsage")}</dt><dd title={tokenUsage}>{tokenUsage}</dd></div>
       </dl>
     </section>
-    {item.debug && <DebugExchangeView item={item.debug}/>}
+	{item.raw_request && item.raw_response && <RawExchangeView request={item.raw_request} response={item.raw_response}/>}
     <section className="detail-section">
       <h3>{t("fieldAudit")}</h3>
       {pass ? <div className="warning-callout"><ShieldAlert size={18}/><div><strong>{protectionLabel}</strong><p>{disabled ? t("disabledNote") : t("passthroughNote")}</p></div></div> : (item.fields ?? []).map((field) => {
@@ -110,14 +110,15 @@ function LogDetail({ item }: { item: AuditLog }) {
   </>;
 }
 
-function DebugExchangeView({ item }: { item: NonNullable<AuditLog["debug"]> }) {
-  return <details className="detail-section debug-exchange debug-exchange--collapsible">
-    <summary>Debug</summary>
-    <div className="debug-exchange__body"><div className="debug-exchange__grid"><DebugPart title={`${item.request.method} ${item.request.url}`} headers={item.request.headers} body={item.request.body}/><DebugPart title={`HTTP ${item.response.status}`} headers={item.response.headers} body={item.response.body}/></div></div>
-  </details>;
+function RawExchangeView({ request, response }: { request: NonNullable<AuditLog["raw_request"]>; response: NonNullable<AuditLog["raw_response"]> }) {
+	const { t } = useI18n();
+	return <details className="detail-section raw-exchange raw-exchange--collapsible">
+		<summary>{t("rawRequest")}</summary>
+		<div className="raw-exchange__body"><div className="raw-exchange__grid"><RawPart title={`${request.method} ${request.url}`} headers={request.headers} body={request.body}/><RawPart title={`HTTP ${response.status}`} headers={response.headers} body={response.body}/></div></div>
+	</details>;
 }
 
-function DebugPart({ title, headers, body }: { title: string; headers?: Record<string, string[]>; body?: string }) {
+function RawPart({ title, headers, body }: { title: string; headers?: Record<string, string[]>; body?: string }) {
   const { t } = useI18n();
   const { notify } = useApp();
   const headersText = formatHeaders(headers);
@@ -126,7 +127,7 @@ function DebugPart({ title, headers, body }: { title: string; headers?: Record<s
     await navigator.clipboard.writeText(`${title}\n\nHeaders\n${headersText}\n\nBody\n${bodyText}`);
     notify(t("copied"));
   }
-  return <article className="debug-part"><header><strong>{title}</strong><button className="debug-part__copy" type="button" aria-label={t("copy")} title={t("copy")} onClick={() => void copyExchange()}><Copy size={12}/></button></header><section><span>Headers</span><pre>{headersText}</pre></section><section><span>Body</span><pre>{bodyText}</pre></section></article>;
+	return <article className="raw-part"><header><strong>{title}</strong><button className="raw-part__copy" type="button" aria-label={t("copy")} title={t("copy")} onClick={() => void copyExchange()}><Copy size={12}/></button></header><section><span>Headers</span><pre>{headersText}</pre></section><section><span>Body</span><pre>{bodyText}</pre></section></article>;
 }
 
 function formatHeaders(headers?: Record<string, string[]>) {
