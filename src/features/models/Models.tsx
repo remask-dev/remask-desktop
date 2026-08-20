@@ -45,7 +45,7 @@ function ModelsContent({ data, advanced }: { data: ModelsData; advanced: boolean
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const current = data.models.find(item => item.id === selected) || data.models[0];
   const pendingSelected = pending !== null && selected === pending.modelId;
-	const requireAdvanced = (action: () => void) => advanced ? action() : notify(t("advancedRequired"));
+	const requireAdvanced = (action: () => void, builtIn = false) => advanced || builtIn ? action() : notify(t("advancedRequired"));
 
   const invalidateModels = () => Promise.all([qc.invalidateQueries({ queryKey: queryKeys.models }), qc.invalidateQueries({ queryKey: queryKeys.activeModel })]);
   const scan = useMutation({ mutationFn: coreApi.scanModels, onSuccess: invalidateModels });
@@ -162,7 +162,7 @@ function ModelsContent({ data, advanced }: { data: ModelsData; advanced: boolean
         ? <PendingDetail pending={pending} retrying={download.isPending} onRetry={retryDownload}/>
         : current
           ? <ModelDetail model={current} runtimeAvailable={data.runtime.available}
-              onActivate={id => requireAdvanced(() => activate.mutate(id))} onUnload={id => unload.mutate(id)}
+              onActivate={model => requireAdvanced(() => activate.mutate(model.id), model.built_in)} onUnload={id => unload.mutate(id)}
               onDelete={id => setDeleteTarget(id)} activatePending={activate.isPending}/>
           : <div className="detail-empty"><span className="detail-empty__icon"><Box size={24}/></span><h2>{t("downloadModel")}</h2><p>{t("noModels")}</p></div>}
     </section>
@@ -215,7 +215,7 @@ function PendingDetail({ pending, retrying, onRetry }: { pending: PendingDownloa
 function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, onDelete, activatePending }: {
   model: ModelPackage;
   runtimeAvailable: boolean;
-  onActivate: (id: string) => void;
+  onActivate: (model: ModelPackage) => void;
   onUnload: (id: string) => void;
   onDelete: (id: string) => void;
   activatePending: boolean;
@@ -233,7 +233,7 @@ function ModelDetail({ model, runtimeAvailable, onActivate, onUnload, onDelete, 
         {model.active
           ? <Button variant="danger" onClick={() => onUnload(model.id)}>{t("unload")}</Button>
           : <>
-              <Button variant="primary" disabled={!model.valid || !runtimeAvailable || activatePending} onClick={() => onActivate(model.id)}>{t("activate")}</Button>
+              <Button variant="primary" disabled={!model.valid || !runtimeAvailable || activatePending} onClick={() => onActivate(model)}>{t("activate")}</Button>
               {!model.built_in && <Button variant="danger" icon={<Trash2 size={13}/>} onClick={() => onDelete(model.id)}>{t("deleteModel")}</Button>}
             </>}
       </div>
