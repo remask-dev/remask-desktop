@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "core": {
-    "repository": "remask-io/remask-core-dist",
+    "repository": "remask-dev/remask-core-dist",
     "version": "latest",
     "manifestAsset": "manifest.json",
     "apiVersion": "v1",
