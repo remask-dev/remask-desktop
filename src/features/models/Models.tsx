@@ -11,6 +11,8 @@ import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Input } from "../../shared/ui/Input";
 import { PageState } from "../../shared/ui/PageState";
+import { hasAdvancedLicense } from "../../shared/license";
+import { AdvancedBadge } from "../../shared/ui/Status";
 
 type PendingDownload = {
   modelId: string;
@@ -28,10 +30,10 @@ type ModelsData = { models: ModelPackage[]; runtime: RuntimeStatus; activeModel:
 export function Models() {
   const query = useModelsData();
   if (query.isPending || !query.models || query.activeModel === undefined) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
-  return <ModelsContent data={{ models: query.models.models, runtime: query.models.runtime, activeModel: query.activeModel }}/>;
+  return <ModelsContent data={{ models: query.models.models, runtime: query.models.runtime, activeModel: query.activeModel }} advanced={hasAdvancedLicense(query.license)}/>;
 }
 
-function ModelsContent({ data }: { data: ModelsData }) {
+function ModelsContent({ data, advanced }: { data: ModelsData; advanced: boolean }) {
   const { t } = useI18n();
   const { notify } = useApp();
   const qc = useQueryClient();
@@ -43,6 +45,7 @@ function ModelsContent({ data }: { data: ModelsData }) {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const current = data.models.find(item => item.id === selected) || data.models[0];
   const pendingSelected = pending !== null && selected === pending.modelId;
+	const requireAdvanced = (action: () => void) => advanced ? action() : notify(t("advancedRequired"));
 
   const invalidateModels = () => Promise.all([qc.invalidateQueries({ queryKey: queryKeys.models }), qc.invalidateQueries({ queryKey: queryKeys.activeModel })]);
   const scan = useMutation({ mutationFn: coreApi.scanModels, onSuccess: invalidateModels });
@@ -123,10 +126,10 @@ function ModelsContent({ data }: { data: ModelsData }) {
 
   return <div className="split-view">
     <section className="list-pane">
-      <div className="pane-title">
-        <div><span>{t("localModels")}</span><small>{data.runtime.name}{data.runtime.provider ? ` · ${data.runtime.provider}` : ""}</small></div>
+      <div className="pane-title model-pane-title">
+        <div><span className="feature-title-with-badge">{t("localModels")}<AdvancedBadge>{t("advancedPlanBadge")}</AdvancedBadge></span><small>{data.runtime.name}{data.runtime.provider ? ` · ${data.runtime.provider}` : ""}</small></div>
         <div className="pane-title__actions">
-          <Button size="icon" variant="ghost" onClick={() => setManual(true)} aria-label={t("downloadModel")}><Plus size={14}/></Button>
+          <Button size="icon" variant="ghost" onClick={() => requireAdvanced(() => setManual(true))} aria-label={t("downloadModel")}><Plus size={14}/></Button>
           <Button size="icon" variant="ghost" onClick={() => scan.mutate()} aria-label={t("scanModels")}><RefreshCw size={14}/></Button>
         </div>
       </div>
@@ -159,7 +162,7 @@ function ModelsContent({ data }: { data: ModelsData }) {
         ? <PendingDetail pending={pending} retrying={download.isPending} onRetry={retryDownload}/>
         : current
           ? <ModelDetail model={current} runtimeAvailable={data.runtime.available}
-              onActivate={id => activate.mutate(id)} onUnload={id => unload.mutate(id)}
+              onActivate={id => requireAdvanced(() => activate.mutate(id))} onUnload={id => unload.mutate(id)}
               onDelete={id => setDeleteTarget(id)} activatePending={activate.isPending}/>
           : <div className="detail-empty"><span className="detail-empty__icon"><Box size={24}/></span><h2>{t("downloadModel")}</h2><p>{t("noModels")}</p></div>}
     </section>

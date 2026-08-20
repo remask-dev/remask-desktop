@@ -13,6 +13,8 @@ import { Input } from "../../shared/ui/Input";
 import { PageState } from "../../shared/ui/PageState";
 import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
+import { hasAdvancedLicense } from "../../shared/license";
+import { AdvancedBadge } from "../../shared/ui/Status";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 
@@ -40,6 +42,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   const [allowLan, setAllowLan] = useState(connection.allowLan());
   const [gatewaySettingsReady, setGatewaySettingsReady] = useState(!inTauri);
   const [license, setLicense] = useState<LicenseState>(data.license);
+  const advanced = hasAdvancedLicense(license);
 
   useEffect(() => {
     if (!inTauri) return;
@@ -62,8 +65,9 @@ function SettingsContent({ data }: { data: SettingsData }) {
           setHTTPProxyPort(httpPort);
           connection.saveForwardProxyPort(httpPort);
         }
-        setAllowLan(saved.allow_lan);
-        connection.saveAllowLan(saved.allow_lan);
+        const licensedAllowLan = saved.allow_lan && hasAdvancedLicense(data.license);
+        setAllowLan(licensedAllowLan);
+        connection.saveAllowLan(licensedAllowLan);
       })
       .catch(() => {})
       .finally(() => setGatewaySettingsReady(true));
@@ -144,7 +148,10 @@ function SettingsContent({ data }: { data: SettingsData }) {
   }
   function applyHFBaseURL() { const next = { ...audit, hf_base_url: hfBaseURL.trim() }; setAudit(next); saveAudit.mutate(next); }
   function applyGatewaySettings(nextAllowLan = allowLan) { if (!saveGatewaySettings.isPending) saveGatewaySettings.mutate({ apiPort: apiGatewayPort, httpPort: httpProxyPort, allowLan: nextAllowLan }); }
-  function toggleAllowLan(next: boolean) { setAllowLan(next); applyGatewaySettings(next); }
+  function toggleAllowLan(next: boolean) {
+    if (next && !advanced) { notify(t("advancedRequired")); return; }
+    setAllowLan(next); applyGatewaySettings(next);
+  }
   async function copyDeviceID() {
     await navigator.clipboard.writeText(license.device_id);
     notify(t("deviceIdCopied"));
@@ -206,7 +213,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
       <SettingRow label={t("apiGatewayPort")} description={t("apiGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} value={apiGatewayPort} onChange={event => setAPIGatewayPort(Number(event.target.value))} onBlur={() => applyGatewaySettings()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
       <SettingRow label={t("proxyGatewayPort")} description={t("proxyGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={() => applyGatewaySettings()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
-      <SettingRow last label={t("allowLanRequests")} description={t("allowLanRequestsSub")}><Switch ariaLabel={t("allowLanRequests")} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} checked={allowLan} onCheckedChange={toggleAllowLan}/></SettingRow>
+      <SettingRow last label={<LabelWithBadge label={t("allowLanRequests")} badge={t("advancedPlanBadge")}/>} description={t("allowLanRequestsSub")}><Switch ariaLabel={t("allowLanRequests")} disabled={!advanced || !gatewaySettingsReady || saveGatewaySettings.isPending} checked={advanced && allowLan} onCheckedChange={toggleAllowLan}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="models" title={t("modelSettings")} subtitle={t("modelSettingsSub")}>
       <SettingRow label={t("hfMirror")} description={t("hfMirrorSub")}><Input className="settings-control" placeholder="https://huggingface.co" value={hfBaseURL} onChange={event => setHFBaseURL(event.target.value)} onBlur={applyHFBaseURL} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
@@ -221,7 +228,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
     </SettingsSection>
     <SettingsSection tone="logs" title={t("audit")} subtitle={t("auditSub")}>
       <SettingRow label={t("recordRedactedContent")} description={t("recordRedactedContentSub")}><Switch ariaLabel={t("recordRedactedContent")} disabled={saveAudit.isPending} checked={audit.record_request_content} onCheckedChange={record_request_content => updateAudit({ record_request_content })}/></SettingRow>
-	  <SettingRow label={t("recordRawRequest")} description={t("recordRawRequestSub")}><Switch ariaLabel={t("recordRawRequest")} disabled={saveAudit.isPending} checked={audit.record_raw_request} onCheckedChange={record_raw_request => updateAudit({ record_raw_request })}/></SettingRow>
+	  <SettingRow label={<LabelWithBadge label={t("recordRawRequest")} badge={t("advancedPlanBadge")}/>} description={t("recordRawRequestSub")}><Switch ariaLabel={t("recordRawRequest")} disabled={!advanced || saveAudit.isPending} checked={advanced && audit.record_raw_request} onCheckedChange={record_raw_request => updateAudit({ record_raw_request })}/></SettingRow>
       <SettingRow last label={t("retention")} description={t("retentionSub")}><Select className="settings-control" value={String(audit.retention_days)} onValueChange={value => updateAudit({ retention_days: Number(value) })} options={[7, 30, 90, 180].map(value => ({ value: String(value), label: `${value} ${t("days")}` }))}/></SettingRow>
       <div className="settings-actions settings-actions--split"><Button variant="danger" onClick={() => setClear(true)}>{t("clearLogs")}</Button></div>
     </SettingsSection>
@@ -233,6 +240,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
 function SettingsSection({ tone, title, subtitle, children }: { tone: string; title: string; subtitle: string; children: React.ReactNode }) {
   return <section className={`settings-group settings-group--${tone}`}><header className="settings-group__heading"><div><h2>{title}</h2><p>{subtitle}</p></div></header><div className="settings-section">{children}</div></section>;
 }
-function SettingRow({ label, description, children, last = false }: { label: string; description: string; children: React.ReactNode; last?: boolean }) {
+function SettingRow({ label, description, children, last = false }: { label: React.ReactNode; description: string; children: React.ReactNode; last?: boolean }) {
   return <div className={`setting-row ${last ? "setting-row--last" : ""}`}><span><strong>{label}</strong><small>{description}</small></span>{children}</div>;
 }
+function LabelWithBadge({ label, badge }: { label: string; badge: string }) { return <span className="setting-label-with-badge">{label}<AdvancedBadge>{badge}</AdvancedBadge></span>; }
