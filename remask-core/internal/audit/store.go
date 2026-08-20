@@ -132,6 +132,7 @@ type Entry struct {
 
 type Query struct {
 	Limit      int
+	Offset     int
 	UpstreamID string
 	Status     string
 	Search     string
@@ -474,7 +475,7 @@ func unmarshalRawResponse(rawResponseJSON string) *RawResponse {
 
 func (s *Store) List(query Query) []Entry {
 	limit := query.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 501 {
 		limit = 100
 	}
 	clauses := []string{"1 = 1"}
@@ -492,11 +493,12 @@ func (s *Store) List(query Query) []Entry {
 		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || gateway_type || ' ' || target_host || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
 		args = append(args, "%"+search+"%")
 	}
-	args = append(args, limit)
+	offset := max(query.Offset, 0)
+	args = append(args, limit, offset)
 	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
 		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
 		response_bytes, entity_count, token_input, token_output, token_total, token_cached, fields_json, raw_request_json, raw_response_json, error_code
-		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
+		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return []Entry{}
 	}
@@ -525,7 +527,7 @@ func (s *Store) List(query Query) []Entry {
 // opened through Get.
 func (s *Store) ListSummaries(query Query) ([]Entry, error) {
 	limit := query.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 501 {
 		limit = 100
 	}
 	clauses := []string{"1 = 1"}
@@ -543,11 +545,12 @@ func (s *Store) ListSummaries(query Query) ([]Entry, error) {
 		clauses = append(clauses, "LOWER(upstream_id || ' ' || profile_id || ' ' || gateway_type || ' ' || target_host || ' ' || model || ' ' || path || ' ' || error_code || ' ' || fields_json) LIKE ?")
 		args = append(args, "%"+search+"%")
 	}
-	args = append(args, limit)
+	offset := max(query.Offset, 0)
+	args = append(args, limit, offset)
 	rows, err := s.db.Query(`SELECT id, timestamp, upstream_id, profile_id, operation_id, model,
 		protection_mode, gateway_type, target_host, method, path, status_code, duration_ms, streaming, request_bytes,
 		response_bytes, entity_count, token_input, token_output, token_total, token_cached, error_code
-		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
+		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query audit summaries: %w", err)
 	}

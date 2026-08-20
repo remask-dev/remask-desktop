@@ -263,7 +263,14 @@ export const coreApi = {
   settings: async () => { const raw = await request<unknown>("/api/v1/settings"); return normalizeAuditSettings(isRecord(raw) ? raw.audit : undefined); },
   policy: async () => normalizePolicy(await request<unknown>("/api/v1/policy")),
   stats: async (range: AuditStatsRange) => normalizeStats(await request<unknown>(`/api/v1/audit/stats?range=${range}`)),
-  logs: async (query = "") => { const raw = await request<unknown>(`/api/v1/audit/logs?limit=100${query}`); return normalizeLogs(isRecord(raw) ? raw.logs : undefined); },
+  logs: async (offset = 0, query = "") => {
+    const raw = await request<unknown>(`/api/v1/audit/logs?limit=50&offset=${offset}${query}`);
+    const value = isRecord(raw) ? raw : {};
+    return {
+      logs: normalizeLogs(value.logs),
+      nextOffset: value.has_more === true ? number(value.next_offset, offset + 50) : undefined,
+    };
+  },
   log: async (id: string) => { const raw = await request<unknown>(`/api/v1/audit/logs/${encodeURIComponent(id)}`); return normalizeLog(isRecord(raw) ? raw.log : undefined); },
   clearLogs: () => request<void>("/api/v1/audit/logs", { method: "DELETE" }),
   redact: async (source: string) => { const raw = await request<unknown>("/api/v1/redact", { method: "POST", body: JSON.stringify({ text: source }) }); const value = isRecord(raw) ? raw : {}; return { text: text(value.text, source), scope_id: text(value.scope_id), replacement_count: number(value.replacement_count), entities: records(value.entities).map(normalizePIIEntity) } satisfies RedactResult; },

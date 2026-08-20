@@ -61,6 +61,35 @@ func TestStorePersistsAndAggregatesMaskedAudit(t *testing.T) {
 	}
 }
 
+func TestStoreListsAuditEntriesByOffset(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Add(-time.Minute)
+	for index := 0; index < 5; index++ {
+		entry := Entry{
+			ID:         "req_" + string(rune('0'+index)),
+			Timestamp:  base.Add(time.Duration(index) * time.Second),
+			UpstreamID: "openai",
+			Method:     "POST",
+			Path:       "/v1/chat/completions",
+			StatusCode: 200,
+		}
+		if err := store.Add(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	logs, err := store.ListSummaries(Query{Limit: 2, Offset: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || logs[0].ID != "req_3" || logs[1].ID != "req_2" {
+		t.Fatalf("unexpected paginated logs: %#v", logs)
+	}
+}
+
 func TestStoreInitializesSettingsFile(t *testing.T) {
 	directory := t.TempDir()
 	store, err := NewStore(directory)

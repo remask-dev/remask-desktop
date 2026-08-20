@@ -382,7 +382,16 @@ func (r *Router) listAuditLogs(w http.ResponseWriter, request *http.Request) {
 		}
 		limit = parsed
 	}
-	query := audit.Query{Limit: limit, UpstreamID: request.URL.Query().Get("upstream_id"), Status: request.URL.Query().Get("status"), Search: request.URL.Query().Get("search")}
+	offset := 0
+	if value := request.URL.Query().Get("offset"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "OFFSET_INVALID", "offset must be a non-negative integer")
+			return
+		}
+		offset = parsed
+	}
+	query := audit.Query{Limit: limit + 1, Offset: offset, UpstreamID: request.URL.Query().Get("upstream_id"), Status: request.URL.Query().Get("status"), Search: request.URL.Query().Get("search")}
 	logs, err := r.audits.ListSummaries(query)
 	if err != nil {
 		if r.logger != nil {
@@ -391,7 +400,11 @@ func (r *Router) listAuditLogs(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusInternalServerError, "AUDIT_LIST_FAILED", "failed to load request logs")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"logs": logs})
+	hasMore := len(logs) > limit
+	if hasMore {
+		logs = logs[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"logs": logs, "has_more": hasMore, "next_offset": offset + len(logs)})
 }
 
 func (r *Router) getAuditLog(w http.ResponseWriter, request *http.Request) {
