@@ -2,6 +2,12 @@ name: Package macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      signed:
+        description: "Sign and notarize the macOS package"
+        required: false
+        type: boolean
+        default: true
   push:
     tags: ["v*"]
 
@@ -25,6 +31,7 @@ jobs:
       - name: Require pinned Core release
         run: node -e 'const lock=require("./scripts/packaging.lock.json"); if (!lock.core?.version || lock.core.version === "latest" || !/^[0-9]+\.[0-9]+\.[0-9]+/.test(lock.core.version) || !/^[a-f0-9]{64}$/i.test(lock.core.manifestSha256 || "")) throw new Error("pin Core version and manifestSha256 before release")'
       - name: Import Apple signing certificate
+        if: ${{ github.event_name == 'push' || inputs.signed }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -38,10 +45,10 @@ jobs:
           security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"; rm -f "$certificate_path"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
           security list-keychain -d user -s "$keychain_path" login.keychain-db; security default-keychain -s "$keychain_path"
-      - name: Build signed package
+      - name: Build package
         env:
-          REMASK_RELEASE: "1"
-          REMASK_SIGN: "1"
+          REMASK_RELEASE: ${{ (github.event_name == 'push' || inputs.signed) && '1' || '0' }}
+          REMASK_SIGN: ${{ (github.event_name == 'push' || inputs.signed) && '1' || '0' }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
