@@ -123,6 +123,10 @@ or Apple ID credentials by setting `APPLE_ID`, `APPLE_PASSWORD`, and
 also submits the final DMG, staples its ticket, validates it with Gatekeeper,
 and only then generates the release checksum.
 
+macOS release packaging re-signs bundled native libraries (including the ONNX
+Runtime dylib) with the app's Developer ID identity before Tauri signs the app.
+This keeps the Team ID consistent under Hardened Runtime library validation.
+
 The GitHub macOS workflow expects `APPLE_CERTIFICATE` (Base64 PKCS#12),
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_KEYCHAIN_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`
