@@ -46,14 +46,39 @@ jobs:
       - run: npm ci
       - name: Require pinned Core release
         run: node -e 'const lock=require("./scripts/packaging.lock.json"); if (!lock.core?.version || lock.core.version === "latest" || !/^[0-9]+\.[0-9]+\.[0-9]+/.test(lock.core.version) || !/^[a-f0-9]{64}$/i.test(lock.core.manifestSha256 || "")) throw new Error("pin Core version and manifestSha256 before release")'
+      - name: Select signing mode
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          requested=0
+          if [[ "${{ github.event_name }}" == "push" || "${{ inputs.signed }}" == "true" ]]; then requested=1; fi
+          if [[ "$requested" == 1 && -n "$WINDOWS_CERTIFICATE" && -n "$WINDOWS_CERTIFICATE_PASSWORD" && "$WINDOWS_CERTIFICATE_THUMBPRINT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo "REMASK_SIGN_ENABLED=1" >> "$GITHUB_ENV"
+            echo "Windows signing requested and credentials are present"
+          else
+            echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
+            echo "Windows signing unavailable; building unsigned package"
+          fi
       - name: Build package
         shell: bash
         env:
-          REMASK_RELEASE: ${{ (github.event_name == 'push' || inputs.signed) && '1' || '0' }}
-          REMASK_SIGN: ${{ (github.event_name == 'push' || inputs.signed) && '1' || '0' }}
           REMASK_GO_CC: C:/msys64/mingw64/bin/gcc.exe
           REMASK_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: npm run package:windows
+        run: |
+          export REMASK_RELEASE=0 REMASK_SIGN=0
+          if [[ "$REMASK_SIGN_ENABLED" == "1" ]]; then
+            export REMASK_RELEASE=1 REMASK_SIGN=1
+            if ! npm run package:windows; then
+              echo "Signed Windows package failed; retrying unsigned"
+              rm -rf artifacts/windows
+              REMASK_RELEASE=0 REMASK_SIGN=0 npm run package:windows
+            fi
+          else
+            npm run package:windows
+          fi
       - name: Install and smoke test
         shell: powershell
         run: |

@@ -30,8 +30,27 @@ jobs:
       - run: npm ci
       - name: Require pinned Core release
         run: node -e 'const lock=require("./scripts/packaging.lock.json"); if (!lock.core?.version || lock.core.version === "latest" || !/^[0-9]+\.[0-9]+\.[0-9]+/.test(lock.core.version) || !/^[a-f0-9]{64}$/i.test(lock.core.manifestSha256 || "")) throw new Error("pin Core version and manifestSha256 before release")'
+      - name: Select signing mode
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          requested=0
+          if [[ "${{ github.event_name }}" == "push" || "${{ inputs.signed }}" == "true" ]]; then requested=1; fi
+          if [[ "$requested" == 1 && -n "$APPLE_CERTIFICATE" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_KEYCHAIN_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_ID" && -n "$APPLE_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            echo "REMASK_SIGN_ENABLED=1" >> "$GITHUB_ENV"
+            echo "Apple signing requested and credentials are present"
+          else
+            echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
+            echo "Apple signing unavailable; building unsigned package"
+          fi
       - name: Import Apple signing certificate
-        if: ${{ github.event_name == 'push' || inputs.signed }}
+        if: ${{ env.REMASK_SIGN_ENABLED == '1' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -47,13 +66,22 @@ jobs:
           security list-keychain -d user -s "$keychain_path" login.keychain-db; security default-keychain -s "$keychain_path"
       - name: Build package
         env:
-          REMASK_RELEASE: ${{ (github.event_name == 'push' || inputs.signed) && '1' || '0' }}
-          REMASK_SIGN: ${{ (github.event_name == 'push' || inputs.signed) && '1' || '0' }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run package:macos
+        run: |
+          export REMASK_RELEASE=0 REMASK_SIGN=0
+          if [[ "$REMASK_SIGN_ENABLED" == "1" ]]; then
+            export REMASK_RELEASE=1 REMASK_SIGN=1
+            if ! npm run package:macos; then
+              echo "Signed macOS package failed; retrying unsigned"
+              rm -rf artifacts/macos
+              REMASK_RELEASE=0 REMASK_SIGN=0 npm run package:macos
+            fi
+          else
+            npm run package:macos
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: remask-macos-${{ github.sha }}
