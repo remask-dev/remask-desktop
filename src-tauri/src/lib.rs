@@ -7,9 +7,11 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -555,6 +557,115 @@ fn open_purchase_page(app: AppHandle, device_id: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn set_tray_locale(app: AppHandle, locale: String) -> Result<(), String> {
+    let tray = app
+        .tray_by_id("main")
+        .ok_or_else(|| "system tray is unavailable".to_string())?;
+    let menu = build_tray_menu(&app, &locale).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+}
+
+fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::Wry>> {
+    let chinese = locale == "zh";
+    let show_item = MenuItem::with_id(
+        app,
+        "show",
+        if chinese {
+            "显示主窗口"
+        } else {
+            "Show Main Window"
+        },
+        true,
+        None::<&str>,
+    )?;
+    let claude_item = MenuItem::with_id(
+        app,
+        "safe-launch-claude-code",
+        "Claude Code",
+        true,
+        None::<&str>,
+    )?;
+    let codex_item = MenuItem::with_id(app, "safe-launch-codex", "Codex", true, None::<&str>)?;
+    let codex_cli_item = MenuItem::with_id(
+        app,
+        "safe-launch-codex-cli",
+        "Codex CLI",
+        true,
+        None::<&str>,
+    )?;
+    let terminal_item = MenuItem::with_id(
+        app,
+        "safe-launch-terminal",
+        if chinese { "终端" } else { "Terminal" },
+        true,
+        None::<&str>,
+    )?;
+    let browser_item = MenuItem::with_id(
+        app,
+        "safe-launch-browser",
+        if chinese { "浏览器" } else { "Browser" },
+        true,
+        None::<&str>,
+    )?;
+    let other_app_item = MenuItem::with_id(
+        app,
+        "safe-launch-other",
+        if chinese {
+            "选择其他应用…"
+        } else {
+            "Choose Another App…"
+        },
+        true,
+        None::<&str>,
+    )?;
+    let safe_launch_menu = Submenu::with_id_and_items(
+        app,
+        "safe-launch",
+        if chinese {
+            "安全启动"
+        } else {
+            "Protected Launch"
+        },
+        true,
+        &[
+            &claude_item,
+            &codex_item,
+            &codex_cli_item,
+            &terminal_item,
+            &browser_item,
+            &other_app_item,
+        ],
+    )?;
+    let copy_environment_item = MenuItem::with_id(
+        app,
+        "copy-environment",
+        if chinese {
+            "复制环境变量"
+        } else {
+            "Copy Environment Variables"
+        },
+        true,
+        None::<&str>,
+    )?;
+    let quit_item = MenuItem::with_id(
+        app,
+        "quit",
+        if chinese { "退出" } else { "Quit" },
+        true,
+        None::<&str>,
+    )?;
+    Menu::with_items(
+        app,
+        &[
+            &show_item,
+            &safe_launch_menu,
+            &copy_environment_item,
+            &quit_item,
+        ],
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -589,17 +700,26 @@ pub fn run() {
             // show and a real quit (closing the window only hides to the tray).
             // The tray uses a monochrome mark; macOS renders it as a template
             // image so it adapts to light and dark menu bars.
-            let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let menu = build_tray_menu(app.handle(), "en")?;
             let tray_icon = tauri::include_image!("icons/tray-icon.png");
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
                 .icon_as_template(cfg!(target_os = "macos"))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
+                    "safe-launch-claude-code" => emit_tray_launch(app, "claude-code"),
+                    "safe-launch-codex" => emit_tray_launch(app, "codex"),
+                    "safe-launch-codex-cli" => emit_tray_launch(app, "codex-cli"),
+                    "safe-launch-terminal" => emit_tray_launch(app, "terminal"),
+                    "safe-launch-browser" => emit_tray_launch(app, "browser"),
+                    "safe-launch-other" => emit_tray_launch(app, "other"),
+                    "copy-environment" => {
+                        if let Err(error) = copy_proxy_environment(app) {
+                            eprintln!("failed to copy proxy environment from tray: {error}");
+                        }
+                    }
                     "quit" => {
                         QUITTING.store(true, Ordering::Relaxed);
                         if let Err(error) = stop_core_process(app.state::<CoreProcess>().inner()) {
@@ -676,7 +796,8 @@ pub fn run() {
             launch_ai_client,
             launch_app_with_proxy,
             launch_preset_with_proxy,
-            open_purchase_page
+            open_purchase_page,
+            set_tray_locale
         ])
         .build(tauri::generate_context!())
         .expect("error while building remask-desktop")
@@ -701,9 +822,134 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+fn emit_tray_launch(app: &AppHandle, preset: &'static str) {
+    if let Err(error) = app.emit("tray-safe-launch", preset) {
+        eprintln!("failed to start protected launch from tray: {error}");
+    }
+}
+
+fn copy_proxy_environment(app: &AppHandle) -> Result<(), String> {
+    let addresses = load_gateway_addresses(app);
+    let http_proxy = format!("http://{}", addresses.http_proxy);
+    let socks_proxy = format!("socks5h://{}", addresses.http_proxy);
+    let mut assignments = vec![
+        ("HTTP_PROXY", http_proxy.as_str()),
+        ("HTTPS_PROXY", http_proxy.as_str()),
+        ("http_proxy", http_proxy.as_str()),
+        ("https_proxy", http_proxy.as_str()),
+        ("ALL_PROXY", socks_proxy.as_str()),
+        ("all_proxy", socks_proxy.as_str()),
+    ];
+    let certificate = system_integration::certificate_path(app)?;
+    let certificate_text = certificate.to_string_lossy();
+    if certificate.is_file() {
+        assignments.extend([
+            ("NODE_EXTRA_CA_CERTS", certificate_text.as_ref()),
+            ("SSL_CERT_FILE", certificate_text.as_ref()),
+            ("REQUESTS_CA_BUNDLE", certificate_text.as_ref()),
+            ("CURL_CA_BUNDLE", certificate_text.as_ref()),
+        ]);
+    }
+    let environment = format_shell_environment(&assignments);
+    copy_text_to_clipboard(&environment)
+}
+
+fn format_shell_environment(assignments: &[(&str, &str)]) -> String {
+    format!(
+        "export {}",
+        assignments
+            .iter()
+            .map(|(key, value)| format!("{key}={}", posix_shell_quote(value)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn posix_shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(target_os = "macos")]
+fn copy_text_to_clipboard(value: &str) -> Result<(), String> {
+    copy_text_with_command("/usr/bin/pbcopy", &[], value)
+}
+
+#[cfg(target_os = "windows")]
+fn copy_text_to_clipboard(value: &str) -> Result<(), String> {
+    copy_text_with_command(
+        "powershell.exe",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+        ],
+        value,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn copy_text_to_clipboard(value: &str) -> Result<(), String> {
+    for (program, arguments) in [
+        ("wl-copy", &[][..]),
+        ("xclip", &["-selection", "clipboard"][..]),
+        ("xsel", &["--clipboard", "--input"][..]),
+    ] {
+        if copy_text_with_command(program, arguments, value).is_ok() {
+            return Ok(());
+        }
+    }
+    Err("no supported clipboard command was found (wl-copy, xclip, or xsel)".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn copy_text_to_clipboard(_value: &str) -> Result<(), String> {
+    Err("copying to the clipboard is not supported on this platform".into())
+}
+
+fn copy_text_with_command(program: &str, arguments: &[&str], value: &str) -> Result<(), String> {
+    use std::process::Stdio;
+
+    let mut child = std::process::Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("start clipboard command: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "clipboard command stdin is unavailable".to_string())?
+        .write_all(value.as_bytes())
+        .map_err(|error| format!("write clipboard content: {error}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("wait for clipboard command: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "clipboard command failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve_core_addresses;
+    use super::{format_shell_environment, resolve_core_addresses};
+
+    #[test]
+    fn proxy_environment_is_shell_quoted() {
+        assert_eq!(
+            format_shell_environment(&[
+                ("HTTP_PROXY", "http://127.0.0.1:17682"),
+                ("SSL_CERT_FILE", "/tmp/Remask's CA.pem")
+            ]),
+            "export HTTP_PROXY='http://127.0.0.1:17682' SSL_CERT_FILE='/tmp/Remask'\"'\"'s CA.pem'"
+        );
+    }
 
     #[test]
     fn gateway_addresses_only_leave_loopback_when_lan_access_is_enabled() {
