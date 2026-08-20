@@ -25,20 +25,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Import Windows signing certificate
-        if: ${{ github.event_name == 'push' || inputs.signed }}
-        shell: powershell
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: |
-          if (-not $env:WINDOWS_CERTIFICATE) { throw "WINDOWS_CERTIFICATE secret is required" }
-          $path = Join-Path $env:RUNNER_TEMP "remask-signing.pfx"
-          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String(($env:WINDOWS_CERTIFICATE -replace '\s', '')))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-          Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          Remove-Item -LiteralPath $path -Force
       - uses: actions/cache@v4
         with:
           path: .cache
@@ -62,6 +48,20 @@ jobs:
             echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
             echo "Windows signing unavailable; building unsigned package"
           fi
+      - name: Import Windows signing certificate
+        if: ${{ env.REMASK_SIGN_ENABLED == '1' }}
+        shell: powershell
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) { throw "WINDOWS_CERTIFICATE secret is required" }
+          $path = Join-Path $env:RUNNER_TEMP "remask-signing.pfx"
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String(($env:WINDOWS_CERTIFICATE -replace '\s', '')))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          Remove-Item -LiteralPath $path -Force
       - name: Build package
         shell: bash
         env:
