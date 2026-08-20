@@ -1,6 +1,11 @@
 # remask-desktop
 
-Tauri 2 desktop client for Remask. Its React frontend talks to the independent `remask-core` management API and controls the bundled Core sidecar in packaged builds.
+Tauri 2 desktop client for Remask. Its React frontend talks to the independent
+`remask-core` management API and controls a bundled Core sidecar in packaged
+builds. Packaging downloads a fixed Core release from the public distribution
+repository; it does not compile or checkout the private Core source.
+
+See the repository split guide at [../docs/repository-split.md](../docs/repository-split.md).
 
 ## Frontend stack
 

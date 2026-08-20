@@ -1,5 +1,12 @@
 {
   "schemaVersion": 1,
+  "core": {
+    "repository": "remask-io/remask-core-dist",
+    "version": "latest",
+    "manifestAsset": "manifest.json",
+    "apiVersion": "v1",
+    "manifestSha256": ""
+  },
   "onnxRuntime": {
     "version": "1.28.0",
     "package": {
