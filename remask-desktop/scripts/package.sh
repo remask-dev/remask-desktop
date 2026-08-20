@@ -264,7 +264,10 @@ collect_artifacts() {
   local version destination bundle_root source_file filename
   local -a files=()
 
-  version="$(node -p "require('$desktop_dir/package.json').version")"
+  # Git Bash exposes Windows paths as /d/..., but the native Windows Node
+  # executable cannot resolve that form in require(). Read from the desktop
+  # directory so the module path stays portable on every packaging host.
+  version="$(cd "$desktop_dir" && node -p "require('./package.json').version")"
   destination="$artifacts_dir/$platform/$arch/$version"
   bundle_root="$tauri_dir/target/$target/release/bundle"
   mkdir -p "$destination"
