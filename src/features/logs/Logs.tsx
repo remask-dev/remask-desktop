@@ -1,5 +1,5 @@
-import { Copy, Search, ShieldAlert, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Copy, LoaderCircle, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AuditEntity, AuditLog, AuditLogSummary } from "../../shared/api/types";
 import { useI18n } from "../../shared/i18n/I18n";
 import { Badge, StatusDot } from "../../shared/ui/Status";
@@ -32,15 +32,18 @@ export function Logs() {
   const { t, dateLocale } = useI18n();
   const logsQuery = useLogsData();
   if (logsQuery.isPending || logsQuery.isError || !logsQuery.data) return <PageState pending={logsQuery.isPending} error={logsQuery.error} onRetry={() => void logsQuery.refetch()}/>;
-  return <LogsContent logs={logsQuery.data} t={t} dateLocale={dateLocale}/>;
+  const logs = Array.from(new Map(logsQuery.data.pages.flatMap(page => page.logs).map(log => [log.id, log])).values());
+  return <LogsContent logs={logs} t={t} dateLocale={dateLocale} hasNextPage={logsQuery.hasNextPage} isFetchingNextPage={logsQuery.isFetchingNextPage} fetchNextPage={logsQuery.fetchNextPage}/>;
 }
 
-function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLogSummary[]; t: ReturnType<typeof useI18n>["t"]; dateLocale: string }) {
+function LogsContent({ logs: sourceLogs, t, dateLocale, hasNextPage, isFetchingNextPage, fetchNextPage }: { logs: AuditLogSummary[]; t: ReturnType<typeof useI18n>["t"]; dateLocale: string; hasNextPage: boolean; isFetchingNextPage: boolean; fetchNextPage: () => Promise<unknown> }) {
   const [initialFilters] = useState(readStoredLogFilters);
   const [query, setQuery] = useState(initialFilters.query);
   const [date, setDate] = useState(initialFilters.date);
   const [protection, setProtection] = useState<ProtectionFilter>(initialFilters.protection);
   const [selected, setSelected] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     try { localStorage.setItem(LOG_FILTER_STORAGE_KEY, JSON.stringify({ query, date, protection } satisfies StoredLogFilters)); } catch { /* storage can be unavailable in restricted webviews */ }
   }, [query, date, protection]);
@@ -52,6 +55,16 @@ function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLogSummar
   }), [sourceLogs, query, date, protection]);
   const item = logs.find((log) => log.id === selected);
   const detailQuery = useLogDetailData(item?.id ?? "");
+  useEffect(() => {
+    const root = listRef.current;
+    const target = loadMoreRef.current;
+    if (!root || !target || !hasNextPage) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting && !isFetchingNextPage) void fetchNextPage();
+    }, { root, rootMargin: "160px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, logs.length]);
 
   return <div className="logs-page">
     <div className="logs-toolbar">
@@ -62,7 +75,7 @@ function LogsContent({ logs: sourceLogs, t, dateLocale }: { logs: AuditLogSummar
       </div>
     </div>
     <div className="split-view logs-view">
-      <section className="list-pane"><div className="request-list">{logs.map((log) => <button key={log.id} className={item?.id === log.id ? "selected" : ""} onClick={() => setSelected(log.id)}><div><StatusDot tone={isPass(log) ? "muted" : "success"}/><strong>{log.upstream_id}</strong><time>{new Date(log.timestamp).toLocaleString(dateLocale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time></div><div className="request-list__route"><code>{log.method} {log.path}</code><span title={log.model}>{log.model || "—"}</span></div><small><span>{log.entity_count} {t("entities")}{log.token_usage?.total ? ` · ${log.token_usage.total} ${t("tokens")}` : ""}</span><span>{log.status_code} · {log.duration_ms} ms{log.streaming ? " · SSE" : ""}</span></small></button>)}</div></section>
+      <section className="list-pane"><div className="request-list" ref={listRef}>{logs.map((log) => <button key={log.id} className={item?.id === log.id ? "selected" : ""} onClick={() => setSelected(log.id)}><div><StatusDot tone={isPass(log) ? "muted" : "success"}/><strong title={log.target_host || "—"}>{log.target_host || "—"}</strong><time>{new Date(log.timestamp).toLocaleString(dateLocale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time></div><div className="request-list__route"><code>{log.method} {log.path}</code><span title={log.model}>{log.model || "—"}</span></div><small><span>{log.entity_count} {t("entities")}{log.token_usage?.total ? ` · ${log.token_usage.total} ${t("tokens")}` : ""}</span><span>{log.status_code} · {log.duration_ms} ms{log.streaming ? " · SSE" : ""}</span></small></button>)}{hasNextPage && <div className="request-list__load-more" ref={loadMoreRef}>{isFetchingNextPage && <LoaderCircle className="core-loading-indicator" size={15}/>}</div>}</div></section>
       <section className="detail-pane">{item ? (detailQuery.isPending ? <PageState pending error={detailQuery.error}/> : detailQuery.data ? <LogDetail item={detailQuery.data}/> : <PageState pending={false} error={detailQuery.error} onRetry={() => void detailQuery.refetch()}/>) : <div className="detail-empty" role="img" aria-label={t("selectRequest")}><FileIcon/></div>}</section>
     </div>
   </div>;

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { coreApi } from "../shared/api/client";
 import type { AuditStats, AuditStatsRange, PolicySettings, RuntimeStatus } from "../shared/api/types";
@@ -104,12 +104,12 @@ export function useOverviewData(range: AuditStatsRange) {
 
 export function useLogsData(query = "") {
   const online = useCoreOnline();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.logs(query),
-    queryFn: () => coreApi.logs(query),
+    queryFn: ({ pageParam }) => coreApi.logs(pageParam, query),
+    initialPageParam: 0,
+    getNextPageParam: page => page.nextOffset,
     enabled: online,
-    initialData: [],
-    initialDataUpdatedAt: 0,
     refetchInterval: online ? 5_000 : false,
     refetchIntervalInBackground: true,
   });
