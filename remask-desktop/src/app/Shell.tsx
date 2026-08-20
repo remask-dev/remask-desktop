@@ -13,6 +13,7 @@ import { useApp } from "./AppContext";
 import { queryKeys, useCore } from "./useCore";
 import { Switch } from "../shared/ui/Switch";
 import { TopbarQuickLaunch } from "../features/launch/QuickLaunch";
+import { TrayActions } from "../features/tray/TrayActions";
 
 const icons = { overview: Gauge, logs: FileClock, test: FlaskConical, gateway: Network, models: Activity, rules: ListChecks, settings: Settings };
 type View = keyof typeof icons | "settings";
@@ -89,12 +90,12 @@ export function Shell() {
     await getCurrentWindow().startDragging();
   }
   const page = <Suspense fallback={null}><Outlet/></Suspense>;
-  return <div className="window-shell">
+  return <><TrayActions/><div className="window-shell">
     <header className="titlebar" data-tauri-drag-region onMouseDown={startWindowDrag}><div className="brand" data-tauri-drag-region><strong data-tauri-drag-region>Remask</strong></div><div className="titlebar-drag" data-tauri-drag-region/><TopbarQuickLaunch/><div className={`topbar-protection ${protectedByCore?"topbar-protection--active":""} ${coreTransitioning?"topbar-protection--starting":""}`}><ShieldCheck className="topbar-protection__icon" size={13}/><span>{protectionLabel}</span><Switch ariaLabel={t("privacyProtectionControl")} disabled={coreTransitioning||protection.isPending} checked={protectedByCore} onCheckedChange={toggleProtection}/></div></header>
     <div className="app-frame"><aside className="sidebar"><nav aria-label={t("overviewTitle")}>{nav.map((item) => { const Icon=icons[item]; const label=item==="rules"?t("rulesNav"):item==="test"?t("localTest"):item==="gateway"?t("gatewayNav"):t(item); return <button key={item} title={label} aria-label={label} aria-current={view===item?"page":undefined} className={`nav-item ${view===item?"nav-item--active":""}`} onClick={() => navigate(`/${item}`)}><Icon size={15}/><span>{label}</span></button>; })}</nav><div className="sidebar__bottom"><button title={t("settings")} aria-label={t("settings")} aria-current={view==="settings"?"page":undefined} className={`nav-item ${view==="settings"?"nav-item--active":""}`} onClick={()=>navigate("/settings")}><Settings size={15}/><span>{t("settings")}</span></button></div></aside>
       <main className={`${view==="overview"||view==="gateway"?"main--headerless":""} ${view==="models"?"main--models":""}`.trim()}>{view!=="overview"&&view!=="gateway"&&<header className="page-header"><div><h1>{meta[view][0]}</h1><p>{meta[view][1]}</p></div>{view==="test"?<span className="local-only-badge"><LockKeyhole size={11}/>{t("localOnly")}</span>:null}{view==="settings"&&<div className="page-header__actions"><Button variant="secondary" disabled={restarting} icon={<RefreshCw size={13}/>} onClick={restartCore}>{t(restarting ? "restarting" : "restart")}</Button></div>}</header>}<div className="page-content">{page}</div></main></div>
     <footer className="statusbar"><span className={core.status === "starting" ? "core-status--starting" : undefined}><StatusDot tone={connected?"success":core.status==="starting"?"warning":"muted"}/>{core.status==="starting"?t("coreStarting"):connected?t("coreOnline"):t("coreOffline")}</span><span className="spacer"/><span><code>remask-core</code> {connected?core.version.data?.version||"—":"—"}</span></footer><Toast message={toast}/>
-  </div>;
+  </div></>;
 }
 
 function coreAddresses() {

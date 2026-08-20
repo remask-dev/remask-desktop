@@ -14,8 +14,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   render() {
     if (!this.state.error) return this.props.children;
     let stored: string | null = null;
-    try { stored = typeof window !== "undefined" ? window.localStorage.getItem("remask.language") : null; } catch { /* Use system language when storage is unavailable. */ }
-    const locale = stored === "zh" || stored === "en" ? stored : (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en");
+    try { stored = typeof window !== "undefined" ? window.localStorage.getItem("remask.language") : null; } catch { /* Fall back to English when storage is unavailable. */ }
+    const locale = stored === "zh" || stored === "en" ? stored : "en";
     const t = messages[locale];
     return <main className="grid h-screen place-content-center bg-background p-8 text-center"><div className="mx-auto mb-4 grid size-12 place-items-center rounded-xl bg-destructive/10 text-destructive"><ShieldAlert size={22}/></div><h1 className="text-base font-semibold">{t.uiLoadFailed}</h1><p className="mt-2 max-w-md text-[11px] leading-relaxed text-muted-foreground">{this.state.error.message}</p><Button className="mx-auto mt-5" variant="primary" onClick={()=>window.location.reload()}>{t.reload}</Button></main>;
   }

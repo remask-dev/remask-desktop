@@ -8,20 +8,8 @@ const localeKey = "remask.language";
 
 /**
  * Resolve a locale only from the locales the UI actually ships. An explicit
- * user choice always wins; otherwise the first visit follows the OS/browser
- * language and falls back to English for unsupported languages.
+ * user choice always wins; otherwise the first visit defaults to English.
  */
-function detectLocale(): Locale {
-  if (typeof navigator === "undefined") return "en";
-  const candidates = navigator.languages?.length ? navigator.languages : [navigator.language];
-  for (const language of candidates) {
-    const normalized = language?.toLowerCase() ?? "";
-    if (normalized.startsWith("zh")) return "zh";
-    if (normalized.startsWith("en")) return "en";
-  }
-  return "en";
-}
-
 function readStoredLocale(): Locale | null {
   if (typeof window === "undefined") return null;
   try {
@@ -33,7 +21,7 @@ function readStoredLocale(): Locale | null {
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, update] = useState<Locale>(() => readStoredLocale() ?? detectLocale());
+  const [locale, update] = useState<Locale>(() => readStoredLocale() ?? "en");
   useLayoutEffect(() => {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en-US";
   }, [locale]);

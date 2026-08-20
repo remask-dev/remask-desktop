@@ -27,7 +27,7 @@ The browser preview at `http://127.0.0.1:1420/` does not spawn a sidecar. Run `r
 
 The desktop Settings view can install the generated Remask CA into the current user's operating-system trust store. macOS uses the login keychain, Windows uses the current-user Root store, and Linux uses `pkexec` plus `update-ca-certificates` when available. The confirmation dialog shows the CA SHA-256 fingerprint before installation; the CA private key never leaves `~/.remask`.
 
-The top-bar quick-launch menu provides protected launches for Codex, a browser, Claude Code, Terminal, Codex CLI, or any installed application. Quick launch enables the current privacy policy when needed, then starts the selected app with HTTP(S)_PROXY pointing to the HTTP endpoint, ALL_PROXY pointing to the SOCKS5 endpoint, and process-local CA variables already set. It does not add protection rules or modify the user's shell profile or global proxy settings. On macOS, reusable launchers are written under `~/.remask/launchers` with mode `0700`.
+The top-bar and system-tray quick-launch menus provide protected launches for Codex, a browser, Claude Code, Terminal, Codex CLI, or any installed application. Quick launch enables the current privacy policy when needed, then starts the selected app with HTTP(S)_PROXY pointing to the HTTP endpoint, ALL_PROXY pointing to the SOCKS5 endpoint, and process-local CA variables already set. The tray can also copy the complete proxy and CA environment as shell exports. These actions do not add protection rules or modify the user's shell profile or global proxy settings. On macOS, reusable launchers are written under `~/.remask/launchers` with mode `0700`.
 
 ## Desktop development and packaging
 
