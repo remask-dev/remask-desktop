@@ -314,6 +314,7 @@ validate_signing_configuration() {
   case "$platform" in
     macos)
       require_command security
+      require_command codesign
       [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]] || die "APPLE_SIGNING_IDENTITY is required for a signed macOS release"
       if ! security find-identity -v -p codesigning | grep -F "${APPLE_SIGNING_IDENTITY}" >/dev/null; then
         die "APPLE_SIGNING_IDENTITY is not available in the macOS keychain"
@@ -338,6 +339,20 @@ validate_signing_configuration() {
         die "REMASK_WINDOWS_CERTIFICATE_THUMBPRINT must be a 40-character SHA-1 certificate thumbprint"
       ;;
   esac
+}
+
+sign_macos_resources() {
+  local file
+  local -a files=()
+
+  [[ "$sign_enabled" == "1" ]] || return
+  while IFS= read -r -d '' file; do files+=("$file"); done < <(
+    find "$tauri_dir/resources" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 2>/dev/null
+  )
+  for file in "${files[@]}"; do
+    log "signing bundled macOS library: $file"
+    codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$file"
+  done
 }
 
 verify_release_artifact_signatures() {
@@ -496,6 +511,11 @@ TARGET_TRIPLE="$target" \
 REMASK_ONNXRUNTIME_LIBRARY="$runtime_library" \
 REMASK_MODEL_IDS="$model_ids" \
 bash "$script_dir/stage-core.sh"
+if [[ "$platform" == "macos" ]]; then
+  # Third-party dylibs can carry their vendor Team ID. Re-sign them before
+  # Tauri signs the app so hardened-runtime loading sees one Team ID.
+  sign_macos_resources
+fi
 
 tauri_args=(build --target "$target" --bundles "$bundles")
 if [[ "$sign_enabled" != "1" ]]; then
