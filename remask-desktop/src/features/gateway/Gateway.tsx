@@ -8,13 +8,14 @@ import { useApp } from "../../app/AppContext";
 import { queryKeys, useGatewayData } from "../../app/useCore";
 import { useI18n } from "../../shared/i18n/I18n";
 import type { MessageKey } from "../../shared/i18n/messages";
-import { Badge } from "../../shared/ui/Status";
+import { AdvancedBadge, Badge } from "../../shared/ui/Status";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Input } from "../../shared/ui/Input";
 import { PageState } from "../../shared/ui/PageState";
 import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
+import { hasAdvancedLicense } from "../../shared/license";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const blankProvider: Upstream = { id: "", base_url: "", profile_id: "openai", credential_mode: "passthrough", enabled: true };
@@ -25,10 +26,10 @@ type SystemCertificateStatus = { supported: boolean; installed: boolean; platfor
 export function Gateway() {
   const query = useGatewayData();
   if (query.isPending || !query.upstreams || !query.profiles || !query.proxyCA || !query.proxyRules) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
-  return <GatewayContent data={{ upstreams: query.upstreams, profiles: query.profiles, proxyCA: query.proxyCA, proxyRules: query.proxyRules }}/>;
+  return <GatewayContent data={{ upstreams: query.upstreams, profiles: query.profiles, proxyCA: query.proxyCA, proxyRules: query.proxyRules }} advanced={hasAdvancedLicense(query.license)}/>;
 }
 
-function GatewayContent({ data }: { data: GatewayData }) {
+function GatewayContent({ data, advanced }: { data: GatewayData; advanced: boolean }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<"api" | "proxy">("proxy");
   return <div className="gateway-page">
@@ -39,11 +40,11 @@ function GatewayContent({ data }: { data: GatewayData }) {
         <button id="gateway-tab-proxy" role="tab" aria-controls="gateway-panel" aria-selected={tab === "proxy"} className={tab === "proxy" ? "active" : ""} onClick={() => setTab("proxy")}><Network size={15}/><strong>{t("proxyGateway")}</strong></button>
       </div>
     </header>
-    <div id="gateway-panel" className="gateway-stage" role="tabpanel" aria-labelledby={tab === "api" ? "gateway-tab-api" : "gateway-tab-proxy"}>{tab === "api" ? <APIGateway data={data}/> : <ProxyGateway data={data}/>}</div>
+    <div id="gateway-panel" className="gateway-stage" role="tabpanel" aria-labelledby={tab === "api" ? "gateway-tab-api" : "gateway-tab-proxy"}>{tab === "api" ? <APIGateway data={data} advanced={advanced}/> : <ProxyGateway data={data} advanced={advanced}/>}</div>
   </div>;
 }
 
-function APIGateway({ data }: { data: GatewayData }) {
+function APIGateway({ data, advanced }: { data: GatewayData; advanced: boolean }) {
   const { t } = useI18n(); const { notify } = useApp(); const qc = useQueryClient();
   const [selected, setSelected] = useState(data.upstreams[0]?.id || "");
   const [editing, setEditing] = useState<Upstream | null>(null);
@@ -55,12 +56,12 @@ function APIGateway({ data }: { data: GatewayData }) {
   return <div className="gateway-workspace">
     <GatewayAccessBar icon={<Server size={14}/>} title={t("apiGateway")} value={connection.proxy()} onCopy={copy}/>
     <div className="split-view gateway-split"><section className="list-pane"><div className="pane-title"><div><span>{t("providers")}</span><small>{data.upstreams.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={() => setEditing({ ...blankProvider })}>{t("addProvider")}</Button></div><div className="service-list gateway-entity-list">{data.upstreams.map(item => <div key={item.id} className={`gateway-entity-row ${current?.id === item.id ? "selected" : ""} ${item.enabled ? "" : "disabled"}`}><button className="gateway-entity-select" onClick={() => setSelected(item.id)}><span className="service-icon"><Server size={15}/></span><span><strong>{item.id}</strong><code>{item.base_url}</code><small>{item.profile_id}</small></span></button><Switch ariaLabel={`${item.id} ${t("enabled")}`} disabled={toggle.isPending} checked={item.enabled} onCheckedChange={() => toggle.mutate(item)}/></div>)}</div></section><section className="detail-pane">{current ? <><header className="detail-header"><div><span>{t("provider")}</span><h2>{current.id}</h2><code>{current.base_url}</code></div><div className="header-actions"><Button onClick={() => setEditing({ ...current })}>{t("edit")}</Button><Button variant="danger" onClick={() => setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section gateway-options"><h3>{t("apiAccessAddress")}</h3><GatewayAddress label={t("sdkBaseUrl")} value={`${connection.proxy()}/proxy/${current.id}`} onCopy={copy}/><p>{t("apiAccessNote")}</p></section><section className="detail-section detail-section--summary"><h3>{t("connectionConfig")}</h3><dl className="property-grid"><div><dt>{t("profile")}</dt><dd title={current.profile_id}>{current.profile_id}</dd></div><div><dt>{t("credential")}</dt><dd title={current.credential_mode === "managed" ? t("managed") : t("pass")}>{current.credential_mode === "managed" ? t("managed") : t("pass")}</dd></div></dl></section></> : <GatewayEmpty icon={<Server size={24}/>} title={t("addProvider")} description={t("providerEmpty")}/>}</section></div>
-    <ProviderDialog item={editing} data={data} onClose={() => setEditing(null)}/>
+    <ProviderDialog item={editing} data={data} advanced={advanced} onClose={() => setEditing(null)}/>
     <Dialog open={!!confirm} title={t("confirmDeleteProvider")} onClose={() => setConfirm(null)} footer={<><Button onClick={() => setConfirm(null)}>{t("cancel")}</Button><Button variant="danger" onClick={() => confirm && remove.mutate(confirm)}>{t("confirm")}</Button></>}><p className="dialog-message">{confirm}</p></Dialog>
   </div>;
 }
 
-function ProxyGateway({ data }: { data: GatewayData }) {
+function ProxyGateway({ data, advanced }: { data: GatewayData; advanced: boolean }) {
   const { t } = useI18n(); const { notify } = useApp(); const qc = useQueryClient();
   const [selected, setSelected] = useState(data.proxyRules[0]?.id || "");
   const [editing, setEditing] = useState<ProxyRule | null>(null);
@@ -85,7 +86,7 @@ function ProxyGateway({ data }: { data: GatewayData }) {
       </div>
     </section>
       <div className="split-view gateway-split"><section className="list-pane"><div className="pane-title"><div><span>{t("protectedTargets")}</span><small>{data.proxyRules.length}</small></div><Button variant="primary" icon={<Plus size={13}/>} onClick={() => setEditing({ ...blankProxyRule, hosts: [...blankProxyRule.hosts] })}>{t("addProtectedTarget")}</Button></div><div className="service-list gateway-entity-list">{data.proxyRules.map(item => <div key={item.id} className={`gateway-entity-row ${current?.id === item.id ? "selected" : ""} ${item.enabled ? "" : "disabled"}`}><button className="gateway-entity-select" onClick={() => setSelected(item.id)}><span className="service-icon"><ShieldCheck size={15}/></span><span><strong>{item.id}</strong><code>{item.hosts[0] || "—"}</code><small>{item.profile_id}</small></span></button><Switch ariaLabel={`${item.id} ${t("enableProtection")}`} disabled={toggle.isPending} checked={item.enabled} onCheckedChange={() => toggle.mutate(item)}/></div>)}</div></section><section className="detail-pane">{current ? <><header className="detail-header"><div><span>{t("protectedTarget")}</span><h2>{current.id}</h2></div><div className="header-actions"><Button onClick={() => setEditing({ ...current, hosts: [...current.hosts] })}>{t("edit")}</Button><Button variant="danger" onClick={() => setConfirm(current.id)}>{t("remove")}</Button></div></header><section className="detail-section detail-section--summary"><h3>{t("matchingScope")}</h3><div className="gateway-hosts"><span>{t("targetHost")}</span><div>{current.hosts.map((host, index) => <code key={`${host}-${index}`} title={host}>{host}</code>)}</div></div><dl className="property-grid"><div><dt>{t("profile")}</dt><dd title={current.profile_id}>{current.profile_id}</dd></div><div><dt>{t("tlsInspection")}</dt><dd className={current.enabled ? "success" : "warning"} title={current.enabled ? t("enabled") : t("disabledStatus")}>{current.enabled ? t("enabled") : t("disabledStatus")}</dd></div></dl></section><ProxyConnectionDetails env={env} proxyCA={data.proxyCA} certificateStatus={certificateStatus} certificateActionPending={installCertificate.isPending || uninstallCertificate.isPending} onCopy={copy} onInstall={() => setConfirmCertificateInstall(true)} onUninstall={() => setConfirmCertificateUninstall(true)}/></> : <GatewayEmpty icon={<ShieldCheck size={24}/>} title={t("addProtectedTarget")} description={t("protectedTargetEmpty")}/>}</section></div>
-    <ProxyRuleDialog item={editing} data={data} onClose={() => setEditing(null)}/>
+    <ProxyRuleDialog item={editing} data={data} advanced={advanced} onClose={() => setEditing(null)}/>
     <Dialog open={!!confirm} title={t("confirmDeleteTarget")} onClose={() => setConfirm(null)} footer={<><Button onClick={() => setConfirm(null)}>{t("cancel")}</Button><Button variant="danger" onClick={() => confirm && remove.mutate(confirm)}>{t("confirm")}</Button></>}><p className="dialog-message">{confirm}</p></Dialog>
     <Dialog open={confirmCertificateInstall} title={t("certificateInstallConfirm")} onClose={() => setConfirmCertificateInstall(false)} footer={<><Button onClick={() => setConfirmCertificateInstall(false)}>{t("cancel")}</Button><Button variant="primary" disabled={installCertificate.isPending} onClick={() => installCertificate.mutate()}>{t("installCertificate")}</Button></>}><p className="dialog-message">{t("certificateInstallDescription")}</p>{data.proxyCA.fingerprint_sha256 && <code className="certificate-fingerprint">SHA-256 {data.proxyCA.fingerprint_sha256}</code>}</Dialog>
     <Dialog open={confirmCertificateUninstall} title={t("certificateUninstallConfirm")} onClose={() => setConfirmCertificateUninstall(false)} footer={<><Button onClick={() => setConfirmCertificateUninstall(false)}>{t("cancel")}</Button><Button variant="danger" disabled={uninstallCertificate.isPending} onClick={() => uninstallCertificate.mutate()}>{t("uninstallCertificate")}</Button></>}><p className="dialog-message">{t("certificateUninstallDescription")}</p>{data.proxyCA.fingerprint_sha256 && <code className="certificate-fingerprint">SHA-256 {data.proxyCA.fingerprint_sha256}</code>}</Dialog>
@@ -114,32 +115,32 @@ function CertificateStatusAction({ certificateStatus, actionDisabled, onInstall,
 function GatewayAddress({ label, value, onCopy }: { label: string; value: string; onCopy: (value: string) => void }) { return <button className="copy-field copy-field--labeled" onClick={() => onCopy(value)}><span><small>{label}</small><code>{value}</code></span><Copy size={14}/></button>; }
 function GatewayEmpty({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) { return <div className="detail-empty"><span className="detail-empty__icon">{icon}</span><h2>{title}</h2><p>{description}</p></div>; }
 
-function ProviderDialog({ item, data, onClose }: { item: Upstream | null; data: GatewayData; onClose: () => void }) {
+function ProviderDialog({ item, data, advanced, onClose }: { item: Upstream | null; data: GatewayData; advanced: boolean; onClose: () => void }) {
   const { t } = useI18n(); const { notify } = useApp(); const qc = useQueryClient(); const editing = !!item && data.upstreams.some(value => value.id === item.id); const [form, setForm] = useState<Upstream>(item || blankProvider);
   useEffect(() => { setForm(item ? { ...item } : { ...blankProvider }); }, [item]);
   const profile = data.profiles.find(value => value.id === form.profile_id);
   const save = useMutation({ mutationFn: () => coreApi.putUpstream(form, editing), onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.upstreams }); onClose(); }, onError: error => notify(String(error)) });
   if (!item) return null;
   const missingManagedAPIKey = form.credential_mode === "managed" && !editing && !form.api_key?.trim();
-  return <Dialog open title={editing ? t("editProvider") : t("addProvider")} description={t("credentialSafety")} onClose={onClose} footer={<><ProfileDirectoryButton/><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || !form.id.trim() || !form.base_url.trim() || !form.profile_id || missingManagedAPIKey}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("providerId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><Field label={t("upstreamUrl")}><Input type="url" value={form.base_url} onChange={event => setForm({ ...form, base_url: event.target.value })}/></Field><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><Field label={t("credential")}><Select value={form.credential_mode} onValueChange={value => setForm({ ...form, credential_mode: value as Upstream["credential_mode"], api_key: value === "managed" ? form.api_key : undefined })} options={[{ value: "passthrough", label: t("pass") }, { value: "managed", label: t("managed") }]}/></Field>{form.credential_mode === "managed" && <Field label={t("apiKey")}><Input type="password" value={form.api_key === "••••••••" ? "" : form.api_key || ""} onChange={event => setForm({ ...form, api_key: event.target.value })} placeholder={profile?.header_templates ? Object.values(profile.header_templates).find(value => value.includes("{{api_key}}")) || "sk-…" : "sk-…"}/></Field>}<label className="field field--switch"><span>{t("enableProvider")}</span><Switch ariaLabel={t("enableProvider")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
+  return <Dialog open title={editing ? t("editProvider") : t("addProvider")} description={t("credentialSafety")} onClose={onClose} footer={<><ProfileDirectoryButton advanced={advanced}/><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || !form.id.trim() || !form.base_url.trim() || !form.profile_id || missingManagedAPIKey}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("providerId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><Field label={t("upstreamUrl")}><Input type="url" value={form.base_url} onChange={event => setForm({ ...form, base_url: event.target.value })}/></Field><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><Field label={t("credential")}><Select value={form.credential_mode} onValueChange={value => setForm({ ...form, credential_mode: value as Upstream["credential_mode"], api_key: value === "managed" ? form.api_key : undefined })} options={[{ value: "passthrough", label: t("pass") }, { value: "managed", label: t("managed") }]}/></Field>{form.credential_mode === "managed" && <Field label={t("apiKey")}><Input type="password" value={form.api_key === "••••••••" ? "" : form.api_key || ""} onChange={event => setForm({ ...form, api_key: event.target.value })} placeholder={profile?.header_templates ? Object.values(profile.header_templates).find(value => value.includes("{{api_key}}")) || "sk-…" : "sk-…"}/></Field>}<label className="field field--switch"><span>{t("enableProvider")}</span><Switch ariaLabel={t("enableProvider")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
 }
 
-function ProxyRuleDialog({ item, data, onClose }: { item: ProxyRule | null; data: GatewayData; onClose: () => void }) {
+function ProxyRuleDialog({ item, data, advanced, onClose }: { item: ProxyRule | null; data: GatewayData; advanced: boolean; onClose: () => void }) {
   const { t } = useI18n(); const { notify } = useApp(); const qc = useQueryClient(); const editing = !!item && data.proxyRules.some(value => value.id === item.id); const [form, setForm] = useState<ProxyRule>(item || blankProxyRule);
   useEffect(() => { setForm(item ? { ...item, hosts: [...item.hosts] } : { ...blankProxyRule, hosts: [...blankProxyRule.hosts] }); }, [item]);
   const save = useMutation({ mutationFn: () => coreApi.putProxyRule({ ...form, hosts: form.hosts.map(host => host.trim()).filter(Boolean) }, editing), onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.proxyRules }); onClose(); }, onError: error => notify(String(error)) });
   if (!item) return null;
-  return <Dialog open title={editing ? t("editProtectedTarget") : t("addProtectedTarget")} description={t("protectedTargetDialogSub")} onClose={onClose} footer={<><ProfileDirectoryButton/><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || !form.id || !form.hosts.some(host => host.trim()) || !form.profile_id}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("targetId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><label className="field field--multiline"><span>{t("targetHosts")}</span><textarea rows={5} value={form.hosts.join("\n")} placeholder={"*.example.com\napi.openai.com:443\n"} onChange={event => setForm({ ...form, hosts: event.target.value.split(/\r?\n/) })}/></label><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><label className="field field--switch"><span>{t("enableProtection")}</span><Switch ariaLabel={t("enableProtection")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
+  return <Dialog open title={editing ? t("editProtectedTarget") : t("addProtectedTarget")} description={t("protectedTargetDialogSub")} onClose={onClose} footer={<><ProfileDirectoryButton advanced={advanced}/><Button onClick={onClose}>{t("cancel")}</Button><Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || !form.id || !form.hosts.some(host => host.trim()) || !form.profile_id}>{t("save")}</Button></>}><div className="form-stack"><Field label={t("targetId")}><Input value={form.id} disabled={editing} onChange={event => setForm({ ...form, id: event.target.value })}/></Field><label className="field field--multiline"><span>{t("targetHosts")}</span><textarea rows={5} value={form.hosts.join("\n")} placeholder={"*.example.com\napi.openai.com:443\n"} onChange={event => setForm({ ...form, hosts: event.target.value.split(/\r?\n/) })}/></label><Field label={t("protocolProfile")}><Select value={form.profile_id} onValueChange={profile_id => setForm({ ...form, profile_id })} options={data.profiles.map(value => ({ value: value.id, label: value.name }))}/></Field><label className="field field--switch"><span>{t("enableProtection")}</span><Switch ariaLabel={t("enableProtection")} checked={form.enabled} onCheckedChange={enabled => setForm({ ...form, enabled })}/></label></div></Dialog>;
 }
 
-function ProfileDirectoryButton() {
+function ProfileDirectoryButton({ advanced }: { advanced: boolean }) {
   const { t } = useI18n(); const { notify } = useApp();
   async function openDirectory() {
     if (!inTauri) { notify(t("desktopOnly")); return; }
     try { await invoke("open_profile_directory"); }
     catch (error) { notify(String(error)); }
   }
-  return <Button variant="ghost" className="mr-auto px-1.5" icon={<FolderOpen size={14}/>} onClick={() => void openDirectory()}>{t("openProfileConfig")}</Button>;
+  return <span className="profile-config-entry"><Button variant="ghost" className="mr-auto px-1.5" icon={<FolderOpen size={14}/>} onClick={() => advanced ? void openDirectory() : notify(t("advancedRequired"))}>{t("customProfileConfig")}</Button><AdvancedBadge>{t("advancedPlanBadge")}</AdvancedBadge></span>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }

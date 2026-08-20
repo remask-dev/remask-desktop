@@ -118,7 +118,7 @@ func (r *Router) importLicense(w http.ResponseWriter, request *http.Request) {
 }
 
 func (r *Router) getPolicy(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, r.rules.Policy())
+	writeJSON(w, http.StatusOK, r.rules.EffectivePolicy())
 }
 
 type policyRequest struct {
@@ -150,6 +150,10 @@ func (r *Router) putPolicy(w http.ResponseWriter, request *http.Request) {
 	if input.Rules != nil {
 		policy.Rules = *input.Rules
 	}
+	if input.Rules != nil && len(policy.Rules) > license.FreeRuleLimit && r.licenses.EnforceFeatures() && !r.licenses.Advanced() {
+		writeError(w, http.StatusForbidden, "LICENSE_FEATURE_REQUIRED", "free edition supports at most 1 rule")
+		return
+	}
 	if err := r.rules.Configure(policy); err != nil {
 		writeError(w, http.StatusBadRequest, "POLICY_INVALID", err.Error())
 		return
@@ -157,7 +161,7 @@ func (r *Router) putPolicy(w http.ResponseWriter, request *http.Request) {
 	// Entity policy changes alter detector output, so cached results must not
 	// survive the update.
 	r.pii.ClearEntityCache()
-	writeJSON(w, http.StatusOK, r.rules.Policy())
+	writeJSON(w, http.StatusOK, r.rules.EffectivePolicy())
 }
 
 func NewProxyRouter(logger *log.Logger, proxy *gateway.Gateway) http.Handler {
@@ -283,6 +287,10 @@ func (r *Router) deleteScope(w http.ResponseWriter, request *http.Request) {
 }
 
 func (r *Router) listProfiles(w http.ResponseWriter, _ *http.Request) {
+	if !r.licenses.Advanced() {
+		writeJSON(w, http.StatusOK, map[string]any{"profiles": r.profiles.BuiltinsList()})
+		return
+	}
 	if err := r.profiles.Refresh(); err != nil {
 		writeError(w, http.StatusInternalServerError, "PROFILE_SCAN_FAILED", err.Error())
 		return
@@ -505,6 +513,10 @@ func (r *Router) putSettings(w http.ResponseWriter, request *http.Request) {
 	if !input.recordRawRequestSet {
 		input.Audit.RecordRawRequest = current.RecordRawRequest
 	}
+	if input.Audit.RecordRawRequest && r.licenses.EnforceFeatures() && !r.licenses.Advanced() {
+		writeError(w, http.StatusForbidden, "LICENSE_FEATURE_REQUIRED", "recording raw requests requires an advanced license")
+		return
+	}
 	if input.Models != nil {
 		input.Audit.HFBaseURL = strings.TrimSpace(input.Models.HFBaseURL)
 	}
@@ -537,6 +549,10 @@ type modelDownloadRequest struct {
 }
 
 func (r *Router) downloadModel(w http.ResponseWriter, request *http.Request) {
+	if r.licenses.EnforceFeatures() && !r.licenses.Advanced() {
+		writeError(w, http.StatusForbidden, "LICENSE_FEATURE_REQUIRED", "downloading or switching models requires an advanced license")
+		return
+	}
 	var input modelDownloadRequest
 	if !decodeJSON(w, request, &input) {
 		return
@@ -659,6 +675,10 @@ func (r *Router) activeModel(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Router) activateModel(w http.ResponseWriter, request *http.Request) {
+	if r.licenses.EnforceFeatures() && !r.licenses.Advanced() {
+		writeError(w, http.StatusForbidden, "LICENSE_FEATURE_REQUIRED", "downloading or switching models requires an advanced license")
+		return
+	}
 	// A model swap changes detection output. Clear before the asynchronous load
 	// starts so no result from the previous model can leak into the new one.
 	r.pii.ClearEntityCache()

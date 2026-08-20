@@ -1,6 +1,7 @@
 package pii
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,5 +28,38 @@ func TestRuleDetectorInitializesPolicyFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(directory, "policy.json")); err != nil {
 		t.Fatalf("policy file was not initialized: %v", err)
+	}
+}
+
+func TestRuleDetectorAppliesConfiguredRuleLimitToAllRules(t *testing.T) {
+	detector := NewRuleDetector()
+	detector.SetRuleLimitProvider(func() int { return 3 })
+	policy := detector.Policy()
+	policy.Rules = []RuleConfig{
+		{ID: "ONE", Pattern: "one", Enabled: true},
+		{ID: "TWO", Pattern: "two", Enabled: true},
+		{ID: "THREE", Pattern: "three", Enabled: true},
+		{ID: "FOUR", Pattern: "four", Enabled: true},
+	}
+	if err := detector.Configure(policy); err != nil {
+		t.Fatal(err)
+	}
+	entities, err := detector.Detect(context.Background(), "one two three four")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entities) != 3 {
+		t.Fatalf("limited entities = %#v", entities)
+	}
+	if got := detector.EffectivePolicy(); len(got.Rules) != 3 {
+		t.Fatalf("effective policy rules = %#v", got.Rules)
+	}
+	if got := detector.Policy(); len(got.Rules) != 4 {
+		t.Fatalf("stored policy rules = %#v", got.Rules)
+	}
+	for _, entity := range entities {
+		if entity.Type == "FOUR" {
+			t.Fatalf("fourth rule was active: %#v", entities)
+		}
 	}
 }

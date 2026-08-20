@@ -32,6 +32,7 @@ type App struct {
 	proxyHandler        http.Handler
 	forwardProxyHandler *forwardproxy.Proxy
 	proxyAuthority      *mitm.Authority
+	advancedLicense     bool
 }
 
 func New(logger *log.Logger) (*App, error) {
@@ -85,6 +86,12 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize policy rules: %w", err)
 	}
+	rules.SetRuleLimitProvider(func() int {
+		if !licenses.EnforceFeatures() || licenses.Advanced() {
+			return 0
+		}
+		return license.FreeRuleLimit
+	})
 	detector := pii.NewDynamicDetector(rules)
 	settings := audits.Settings()
 	cacheBackend := options.EntityCacheBackend
@@ -148,6 +155,7 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	}
 
 	profiles := profile.NewRegistry(profile.Builtins()...)
+	profiles.SetAdvancedProvider(func() bool { return !licenses.EnforceFeatures() || licenses.Advanced() })
 	if strings.TrimSpace(options.DataDir) != "" {
 		profilesDir := filepath.Join(options.DataDir, "profiles")
 		if err := profile.EnsureExampleFile(profilesDir); err != nil {
@@ -175,7 +183,7 @@ func NewWithOptions(logger *log.Logger, options Options) (*App, error) {
 	handler := httpapi.NewRouter(logger, service, profiles, upstreams, proxyRules, models, operations, audits, authority, licenses, rules)
 	return &App{
 		handler: handler, proxyHandler: httpapi.NewProxyRouter(logger, proxy),
-		forwardProxyHandler: forward, proxyAuthority: authority,
+		forwardProxyHandler: forward, proxyAuthority: authority, advancedLicense: licenses.Advanced(),
 	}, nil
 }
 
@@ -213,3 +221,5 @@ func (a *App) ForwardProxy() *forwardproxy.Proxy { return a.forwardProxyHandler 
 func (a *App) ProxyAuthorityStatus() mitm.Status { return a.proxyAuthority.Status() }
 
 func (a *App) RootCertificatePEM() []byte { return a.proxyAuthority.RootCertificatePEM() }
+
+func (a *App) AdvancedLicense() bool { return a.advancedLicense }

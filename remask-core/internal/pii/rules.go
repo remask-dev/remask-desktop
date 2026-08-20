@@ -36,10 +36,11 @@ type compiledRule struct {
 }
 
 type RuleDetector struct {
-	mu     sync.RWMutex
-	rules  []compiledRule
-	policy PolicySettings
-	path   string
+	mu        sync.RWMutex
+	rules     []compiledRule
+	policy    PolicySettings
+	path      string
+	ruleLimit func() int
 }
 
 func NewRuleDetector() *RuleDetector {
@@ -96,6 +97,12 @@ func NewRuleDetectorWithDataDir(dataDir string) (*RuleDetector, error) {
 
 func (d *RuleDetector) ID() string { return "rules" }
 
+func (d *RuleDetector) SetRuleLimitProvider(provider func() int) {
+	d.mu.Lock()
+	d.ruleLimit = provider
+	d.mu.Unlock()
+}
+
 func (d *RuleDetector) Detect(ctx context.Context, text string) ([]Entity, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -103,7 +110,13 @@ func (d *RuleDetector) Detect(ctx context.Context, text string) ([]Entity, error
 
 	d.mu.RLock()
 	rules := append([]compiledRule(nil), d.rules...)
+	limitProvider := d.ruleLimit
 	d.mu.RUnlock()
+	if limitProvider != nil {
+		if limit := limitProvider(); limit > 0 && len(rules) > limit {
+			rules = rules[:limit]
+		}
+	}
 	var entities []Entity
 	for _, current := range rules {
 		if !current.config.Enabled {
@@ -129,6 +142,22 @@ func (d *RuleDetector) Policy() PolicySettings {
 	result := d.policy
 	result.EntityTypes = append([]EntityTypeConfig(nil), d.policy.EntityTypes...)
 	result.Rules = append([]RuleConfig(nil), d.policy.Rules...)
+	return result
+}
+
+// EffectivePolicy is the entitlement-filtered view exposed to clients. The
+// full policy remains stored so rules created under a paid license are not
+// destroyed merely because the license expires or is temporarily missing.
+func (d *RuleDetector) EffectivePolicy() PolicySettings {
+	result := d.Policy()
+	d.mu.RLock()
+	limitProvider := d.ruleLimit
+	d.mu.RUnlock()
+	if limitProvider != nil {
+		if limit := limitProvider(); limit > 0 && len(result.Rules) > limit {
+			result.Rules = result.Rules[:limit]
+		}
+	}
 	return result
 }
 

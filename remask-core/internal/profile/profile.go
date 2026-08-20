@@ -42,6 +42,13 @@ type Registry struct {
 	profiles map[string]Profile
 	builtins map[string]Profile
 	dir      string
+	advanced func() bool
+}
+
+func (r *Registry) SetAdvancedProvider(provider func() bool) {
+	r.mu.Lock()
+	r.advanced = provider
+	r.mu.Unlock()
 }
 
 const ExampleFileName = "example-openai-compatible.json"
@@ -97,6 +104,12 @@ func NewRegistry(profiles ...Profile) *Registry {
 // updated without changing provider/target configuration.
 func (r *Registry) LoadDir(dir string) error {
 	if strings.TrimSpace(dir) == "" {
+		return nil
+	}
+	r.mu.RLock()
+	advanced := r.advanced == nil || r.advanced()
+	r.mu.RUnlock()
+	if !advanced {
 		return nil
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -169,6 +182,22 @@ func (r *Registry) List() []Profile {
 	defer r.mu.RUnlock()
 	result := make([]Profile, 0, len(r.profiles))
 	for _, item := range r.profiles {
+		if r.advanced != nil && !r.advanced() {
+			if _, builtin := r.builtins[item.ID]; !builtin {
+				continue
+			}
+		}
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+func (r *Registry) BuiltinsList() []Profile {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]Profile, 0, len(r.builtins))
+	for _, item := range r.builtins {
 		result = append(result, item)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -179,6 +208,11 @@ func (r *Registry) Get(id string) (Profile, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	item, ok := r.profiles[id]
+	if ok && r.advanced != nil && !r.advanced() {
+		if _, builtin := r.builtins[id]; !builtin {
+			return Profile{}, false
+		}
+	}
 	return item, ok
 }
 

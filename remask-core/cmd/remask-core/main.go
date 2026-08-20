@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -59,6 +60,16 @@ func main() {
 	if err != nil {
 		logger.Printf("initialize application: %v", err)
 		os.Exit(1)
+	}
+	if !application.AdvancedLicense() {
+		for name, value := range map[string]*string{"proxy": proxyAddr, "forward proxy": forwardProxyAddr} {
+			host, port, splitErr := net.SplitHostPort(*value)
+			ip := net.ParseIP(host)
+			if splitErr == nil && ip != nil && !ip.IsLoopback() {
+				logger.Printf("%s LAN binding requires an advanced license; using loopback", name)
+				*value = net.JoinHostPort("127.0.0.1", port)
+			}
+		}
 	}
 	if *selfTest {
 		logger.Printf("self-test passed runtime=%s active_model=%s", runtime.Name(), *activeModel)

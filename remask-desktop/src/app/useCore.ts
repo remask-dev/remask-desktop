@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { coreApi } from "../shared/api/client";
-import type { AuditStats, AuditStatsRange, PolicySettings, RuntimeStatus } from "../shared/api/types";
+import type { AuditStats, AuditStatsRange, LicenseState, PolicySettings, RuntimeStatus } from "../shared/api/types";
 
 /**
  * Query keys are the resource boundary for the desktop client. Mutations can
@@ -126,21 +126,24 @@ export function useGatewayData() {
   const profiles = useQuery({ queryKey: queryKeys.profiles, queryFn: coreApi.profiles, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
   const proxyCA = useQuery({ queryKey: queryKeys.proxyCA, queryFn: coreApi.proxyCA, enabled: online, initialData: emptyProxyCA, initialDataUpdatedAt: 0 });
   const proxyRules = useQuery({ queryKey: queryKeys.proxyRules, queryFn: coreApi.proxyRules, enabled: online, initialData: [], initialDataUpdatedAt: 0 });
-  return combineQueries({ upstreams, profiles, proxyCA, proxyRules });
+  const license = useQuery({ queryKey: queryKeys.license, queryFn: coreApi.license, enabled: online, initialData: { device_id: "", status: "missing" } as LicenseState, initialDataUpdatedAt: 0 });
+  return combineQueries({ upstreams, profiles, proxyCA, proxyRules, license });
 }
 
 export function useModelsData() {
   const online = useCoreOnline();
   const models = useQuery({ queryKey: queryKeys.models, queryFn: coreApi.models, enabled: online, initialData: () => ({ models: [], runtime: emptyRuntime() }), initialDataUpdatedAt: 0 });
   const activeModel = useQuery({ queryKey: queryKeys.activeModel, queryFn: coreApi.activeModel, enabled: online, initialData: null, initialDataUpdatedAt: 0 });
-  return combineQueries({ models, activeModel });
+  const license = useQuery({ queryKey: queryKeys.license, queryFn: coreApi.license, enabled: online, initialData: { device_id: "", status: "missing" } as LicenseState, initialDataUpdatedAt: 0 });
+  return combineQueries({ models, activeModel, license });
 }
 
 export function useRulesData() {
   const online = useCoreOnline();
   const policy = useQuery({ queryKey: queryKeys.policy, queryFn: coreApi.policy, enabled: online, initialData: emptyPolicy, initialDataUpdatedAt: 0 });
   const models = useQuery({ queryKey: queryKeys.models, queryFn: coreApi.models, enabled: online, initialData: () => ({ models: [], runtime: emptyRuntime() }), initialDataUpdatedAt: 0 });
-  return combineQueries({ policy, models });
+  const license = useQuery({ queryKey: queryKeys.license, queryFn: coreApi.license, enabled: online, initialData: { device_id: "", status: "missing" } as LicenseState, initialDataUpdatedAt: 0 });
+  return combineQueries({ policy, models, license });
 }
 
 export function useSettingsData() {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +20,31 @@ type Manager struct {
 	data      []byte
 	loadErr   error
 }
+
+// Advanced reports whether the currently installed license unlocks paid
+// features. An unlicensed (or otherwise invalid) installation is always the
+// free tier. Edition names are intentionally normalized so licenses issued as
+// pro/premium/advanced/professional all receive the same entitlement.
+func (m *Manager) Advanced() bool {
+	state := m.State()
+	if state.Status != StatusValid {
+		return false
+	}
+	edition := strings.ToLower(strings.TrimSpace(state.Edition))
+	return edition != "" && edition != "free" && edition != "trial"
+}
+
+// EnforceFeatures is disabled for ephemeral managers used by embedders and
+// unit tests that do not configure a data directory. Desktop/Core installs
+// always have a persistent data directory, so production feature gates remain
+// mandatory while in-memory integrations retain their historical behavior.
+func (m *Manager) EnforceFeatures() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.path != ""
+}
+
+const FreeRuleLimit = 1
 
 func NewManager(dataDir, deviceID string, deviceErr error, verifier *Verifier) *Manager {
 	if verifier == nil {

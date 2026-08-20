@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/remask/remask-core/internal/license"
+	"github.com/remask/remask-core/internal/pii"
 )
 
 func TestLicenseStatusAndImportAPI(t *testing.T) {
@@ -58,5 +59,21 @@ func TestLicenseImportAPIRejectsInvalidFile(t *testing.T) {
 	router.importLicense(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "LICENSE_FILE_INVALID") {
 		t.Fatalf("invalid import: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestFreeLicenseRejectsSecondRuleIncludingPreset(t *testing.T) {
+	manager := license.NewManager(t.TempDir(), "RMK1-TEST", nil, license.NewVerifier(nil))
+	router := &Router{licenses: manager, rules: pii.NewRuleDetector()}
+	body := `{"rules":[` +
+		`{"id":"SECRET_KEY","pattern":"secret","enabled":true},` +
+		`{"id":"ONE","pattern":"one","enabled":true}` +
+		`]}`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/policy", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	router.putPolicy(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "LICENSE_FEATURE_REQUIRED") {
+		t.Fatalf("second free rule response: %d %s", response.Code, response.Body.String())
 	}
 }
