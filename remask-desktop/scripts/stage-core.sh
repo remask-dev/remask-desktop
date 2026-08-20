@@ -2,17 +2,13 @@
 set -euo pipefail
 
 desktop_dir="$(cd "$(dirname "$0")/.." && pwd)"
-workspace_dir="$(cd "$desktop_dir/.." && pwd)"
-core_dir="$workspace_dir/remask-core"
 tauri_dir="$desktop_dir/src-tauri"
+packaging_lock="$desktop_dir/scripts/packaging.lock.json"
 target_triple="${TARGET_TRIPLE:-$(rustc -vV | awk '/^host:/ { print $2 }')}"
 runtime_library="${REMASK_ONNXRUNTIME_LIBRARY:-}"
 model_ids="${REMASK_MODEL_IDS:-openai-privacy-filter-q4f16}"
-go_cc="${REMASK_GO_CC:-${CC:-}}"
 runtime_target_dir="$tauri_dir/resources/onnxruntime"
 models_stage_dir="$tauri_dir/resources/models.stage"
-license_public_key="${REMASK_LICENSE_PUBLIC_KEY:-}"
-license_key_id="${REMASK_LICENSE_KEY_ID:-prod-v1}"
 
 if [[ ! "$target_triple" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "invalid TARGET_TRIPLE: $target_triple" >&2
@@ -27,17 +23,6 @@ case "$target_triple" in
     exit 1
     ;;
 esac
-case "$target_triple" in
-  aarch64-*|arm64-*) target_goarch="arm64" ;;
-  x86_64-*|amd64-*) target_goarch="amd64" ;;
-  i686-*|i386-*) target_goarch="386" ;;
-  armv7*|arm-*) target_goarch="arm" ;;
-  *)
-    echo "unsupported TARGET_TRIPLE architecture: $target_triple" >&2
-    exit 1
-    ;;
-esac
-
 case "$target_goos" in
   darwin) runtime_filename="libonnxruntime.dylib" ;;
   linux) runtime_filename="libonnxruntime.so" ;;
@@ -47,12 +32,6 @@ case "$target_goos" in
     exit 1
     ;;
 esac
-
-host_goos="$(go env GOOS)"
-if [[ "$target_goos" != "$host_goos" && -z "$go_cc" ]]; then
-  echo "cross-compiling the ONNX-enabled Core requires a target C compiler; set REMASK_GO_CC" >&2
-  exit 1
-fi
 
 sidecar_path="$tauri_dir/binaries/remask-core-$target_triple"
 if [[ "$target_goos" == "windows" ]]; then
@@ -74,58 +53,24 @@ if [[ -z "$runtime_library" || ! -f "$runtime_library" ]]; then
   echo "set REMASK_ONNXRUNTIME_LIBRARY to the platform ONNX Runtime shared library" >&2
   exit 1
 fi
-if [[ -n "$license_public_key" && ! "$license_public_key" =~ ^[A-Za-z0-9+/=_-]+$ ]]; then
-  echo "REMASK_LICENSE_PUBLIC_KEY must be a Base64 Ed25519 public key" >&2
-  exit 1
-fi
-if [[ ! "$license_key_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "REMASK_LICENSE_KEY_ID contains unsupported characters" >&2
-  exit 1
-fi
 
 mkdir -p "$tauri_dir/binaries" "$runtime_target_dir"
 rm -rf "$models_stage_dir"
 mkdir -p "$models_stage_dir"
 
-(
-  cd "$core_dir"
-  go_build_env=(GOOS="$target_goos" GOARCH="$target_goarch" CGO_ENABLED=1)
-  if [[ -n "$go_cc" ]]; then
-    go_build_env+=(CC="$go_cc")
-  fi
-  go_build_args=(-tags onnxruntime -o "$sidecar_path")
-  if [[ -n "$license_public_key" ]]; then
-    go_build_args+=(-ldflags "-X github.com/remask/remask-core/internal/license.EmbeddedPublicKey=$license_public_key -X github.com/remask/remask-core/internal/license.EmbeddedKeyID=$license_key_id")
-  fi
-  env "${go_build_env[@]}" go build "${go_build_args[@]}" ./cmd/remask-core
-)
-
-old_ifs="$IFS"
-IFS=','
-for model_id in $model_ids; do
-  IFS="$old_ifs"
-  model_id="$(printf '%s' "$model_id" | tr -d '[:space:]')"
-  if [[ ! "$model_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    echo "invalid model id: $model_id" >&2
-    exit 1
-  fi
-  model_source="$core_dir/models/$model_id"
-  model_manifest="$model_source/manifest.json"
-  if [[ ! -f "$model_manifest" ]]; then
-    echo "model package not found: $model_id" >&2
-    exit 1
-  fi
-  if ! grep -q "\"id\"[[:space:]]*:[[:space:]]*\"$model_id\"" "$model_manifest"; then
-    echo "manifest id does not match directory: $model_id" >&2
-    exit 1
-  fi
-  model_target="$models_stage_dir/$model_id"
-  rm -rf "$model_target"
-  cp -R "$model_source" "$model_target"
-  echo "staged model $model_id"
-  IFS=','
-done
-IFS="$old_ifs"
+# Core is a prebuilt public release asset.  The desktop project never checks
+# out or compiles the private Core source; fetch-core.mjs verifies the release
+# manifest, target archive, and model package checksums before staging them.
+node "$desktop_dir/scripts/fetch-core.mjs" \
+  "$packaging_lock" \
+  "$target_triple" \
+  "$tauri_dir/binaries" \
+  "$models_stage_dir" \
+  "$model_ids"
+[[ -f "$sidecar_path" ]] || {
+  echo "Core fetch did not stage the expected sidecar: $sidecar_path" >&2
+  exit 1
+}
 rm -rf "$tauri_dir/resources/models"
 mv "$models_stage_dir" "$tauri_dir/resources/models"
 runtime_source_dir="$(cd "$(dirname "$runtime_library")" && pwd)"

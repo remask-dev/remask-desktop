@@ -392,7 +392,7 @@ Manifest 示例：
 
 模型包必须通过 schema、文件大小与 SHA-256、输入输出张量、标签集合和自检样例校验。当前 Go binding 使用 ONNX Runtime C API 1.28；桌面发行包必须携带受控版本的对应平台动态库。Q4 模型能否运行取决于模型实际使用的 ONNX 算子和目标平台的 ONNX Runtime 版本，不能只根据文件名判断兼容性。
 
-桌面打包前由 `remask-desktop/scripts/stage-core.sh` 构建带 `onnxruntime` tag 的 sidecar，并将选定模型和动态库暂存到 Tauri resources。开发源码目录不复制模型，保持 `remask-core` 与 `remask-desktop` 的发布边界清晰。
+私有 Core 流水线负责构建带 ONNX Runtime 支持的 sidecar，并把目标平台二进制和模型发布为公开、不可覆盖的 Release 资产。桌面打包前由 `remask-desktop/scripts/stage-core.sh` 根据锁文件下载并校验这些资产，再将 sidecar、选定模型和动态库暂存到 Tauri resources；桌面构建不访问或编译 Core 源码。
 
 核心支持通过 `--active-model` 或 `REMASK_ACTIVE_MODEL` 指定启动模型。指定后必须在开始监听 HTTP 前完成模型包校验、Session 创建和自检；任一步失败都终止启动，避免桌面显示核心在线但实际悄然退化为仅规则模式。桌面发行版不显式指定模型，由 Core 从随包的可用模型中自动选择；服务端部署也可以不设置该参数并通过管理 API 切换模型。
 
@@ -1241,7 +1241,7 @@ api_key
 
 ## 22. 关键决策总结
 
-1. `remask-core` 与 `remask-desktop` 是两个独立项目，仅通过 HTTP API 通信。
+1. 私有 `remask-core`、公开 `remask-core-dist` 与公开 `remask-desktop` 是三个独立仓库；Core 与桌面运行时仅通过 HTTP API 通信。
 2. 首版传输范围固定为 HTTP JSON 和 SSE。
 3. AI 协议通过声明式 Profile 适配，PII 核心不感知厂商。
 4. 字段选择使用受控 JSON Pointer Pattern，不递归猜测所有字符串。

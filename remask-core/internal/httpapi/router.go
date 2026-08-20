@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/remask/remask-core/internal/audit"
+	"github.com/remask/remask-core/internal/buildinfo"
 	"github.com/remask/remask-core/internal/gateway"
 	"github.com/remask/remask-core/internal/license"
 	"github.com/remask/remask-core/internal/mitm"
@@ -188,7 +189,8 @@ func (r *Router) proxyCAStatus(w http.ResponseWriter, _ *http.Request) {
 
 func (r *Router) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name": "remask-core", "version": "0.1.0-dev", "api_version": "v1",
+		"name": "remask-core", "version": buildinfo.Version, "api_version": buildinfo.APIVersion,
+		"build_id": buildinfo.BuildID, "build_time": buildinfo.BuildTime,
 		"capabilities":  []string{"license.offline", "license.device-bound", "pii.rules", "pii.rules.configurable", "pii.entity-toggle", "pii.entity-cache", "pii.redact", "pii.restore", "proxy.http-json", "proxy.sse", "proxy.service-id-route", "proxy.domain-route", "proxy.auto-route", "proxy.path-passthrough", "proxy.forward-http", "proxy.forward-connect", "proxy.socks5", "proxy.selective-mitm", "proxy.rules.persisted", "proxy.global-toggle", "models.manifest", "models.hot-swap", "audit.sqlite", "audit.masked-log", "audit.token-usage", "audit.stats", "settings.persisted", "upstreams.persisted"},
 		"model_runtime": r.models.RuntimeStatus(),
 	})

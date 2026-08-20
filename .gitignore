@@ -8,6 +8,7 @@ artifacts
 /remask-core/remask-core
 /remask-core/coverage.out
 /remask-core/models/
+/remask-core/dist/
 
 # Desktop generated files
 /remask-desktop/dist/

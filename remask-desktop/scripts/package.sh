@@ -420,12 +420,13 @@ notarize_macos_disk_images() {
   done
 }
 
-require_command go
 require_command node
 require_command npm
 require_command rustc
 require_command rustup
 [[ -f "$packaging_lock" ]] || die "packaging lock not found: $packaging_lock"
+node -e 'const lock = require(process.argv[1]); if (!lock.core || !lock.core.repository) process.exit(1)' "$packaging_lock" \
+  || die "packaging lock must declare a public Core distribution under core.repository"
 [[ -x "$desktop_dir/node_modules/.bin/tauri" ]] || die "desktop dependencies are missing; run npm ci"
 
 host_platform="$(detect_host_platform)"
@@ -498,9 +499,6 @@ ensure_rust_target "$target"
 resolve_runtime_library "$platform" "$arch"
 runtime_library="$resolved_runtime_library"
 model_ids="${REMASK_MODEL_IDS:-openai-privacy-filter-q4f16}"
-node "$script_dir/verify-packaging-inputs.mjs" \
-  "$packaging_lock" "$runtime_library" "$resolved_runtime_sha256" \
-  "$workspace_dir/remask-core/models" "$model_ids"
 
 log "platform=$platform arch=$arch target=$target bundles=$bundles"
 if [[ "$platform" == "windows" ]]; then
@@ -511,6 +509,9 @@ TARGET_TRIPLE="$target" \
 REMASK_ONNXRUNTIME_LIBRARY="$runtime_library" \
 REMASK_MODEL_IDS="$model_ids" \
 bash "$script_dir/stage-core.sh"
+node "$script_dir/verify-packaging-inputs.mjs" \
+  "$packaging_lock" "$runtime_library" "$resolved_runtime_sha256" \
+  "$tauri_dir/resources/models" "$model_ids"
 if [[ "$platform" == "macos" ]]; then
   # Third-party dylibs can carry their vendor Team ID. Re-sign them before
   # Tauri signs the app so hardened-runtime loading sees one Team ID.

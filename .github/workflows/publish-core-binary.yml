@@ -1,0 +1,153 @@
+name: Publish Core binary
+
+on:
+  push:
+    tags:
+      - "core-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Core semantic version (for example 1.3.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-core-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: remask-core/go.mod
+          cache-dependency-path: remask-core/go.sum
+
+      - name: Resolve release version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          version="${DISPATCH_VERSION:-${GITHUB_REF_NAME#core-v}}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          echo "REMASK_CORE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Download and verify ONNX Runtime
+        shell: bash
+        working-directory: remask-core
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 - "$TARGET" <<'PY'
+          import hashlib, json, os, pathlib, sys, urllib.request, zipfile
+          target = sys.argv[1]
+          lock = json.load(open("scripts/onnxruntime.lock.json"))
+          spec = lock["targets"].get(target)
+          if not spec or not spec["sha256"]:
+              raise SystemExit(f"no ONNX Runtime lock for {target}")
+          cache = pathlib.Path(os.environ.get("RUNNER_TEMP", ".")) / "onnxruntime.nupkg"
+          if not cache.exists() or hashlib.sha256(cache.read_bytes()).hexdigest() != lock["package"]["sha256"]:
+              urllib.request.urlretrieve(lock["package"]["url"], cache)
+          if hashlib.sha256(cache.read_bytes()).hexdigest() != lock["package"]["sha256"]:
+              raise SystemExit("ONNX Runtime package checksum mismatch")
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "onnxruntime-native"
+          out.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(cache) as archive:
+              data = archive.read(spec["path"])
+          if hashlib.sha256(data).hexdigest() != spec["sha256"]:
+              raise SystemExit("ONNX Runtime library checksum mismatch")
+          dest = out / pathlib.Path(spec["path"]).name
+          dest.write_bytes(data)
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"REMASK_ONNXRUNTIME_LIBRARY={dest}\n")
+          PY
+
+      - name: Download locked built-in model
+        shell: bash
+        working-directory: remask-core
+        run: |
+          if [[ ! -f models/openai-privacy-filter-q4f16/manifest.json ]]; then
+            go run ./cmd/remask-model-downloader \
+              -repo openai/privacy-filter \
+              -revision 7ffa9a043d54d1be65afb281eddf0ffbe629385b \
+              -variant q4f16 \
+              -id openai-privacy-filter-q4f16 \
+              -name "OpenAI Privacy Filter Q4F16" \
+              -output models
+          fi
+
+      - name: Build Core package
+        shell: bash
+        working-directory: remask-core
+        run: |
+          rm -rf dist
+          ./scripts/package-core-release.sh "$TARGET" "$REMASK_CORE_VERSION" dist
+          if [[ "$TARGET" == "aarch64-apple-darwin" ]]; then
+            ./scripts/package-model-release.sh models openai-privacy-filter-q4f16 "${REMASK_MODEL_VERSION:-7ffa9a043d54d1be65afb281eddf0ffbe629385b}" dist
+          fi
+        env:
+          TARGET: ${{ matrix.target }}
+          REMASK_GO_CC: ${{ startsWith(matrix.target, 'x86_64-pc-windows') && 'C:/msys64/mingw64/bin/gcc.exe' || '' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-${{ matrix.target }}
+          path: remask-core/dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: core-public-release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate release manifest
+        shell: bash
+        run: |
+          node remask-core/scripts/generate-release-manifest.mjs dist "${{ inputs.version || github.ref_name }}"
+          find dist -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CORE_DIST_APP_ID }}
+          private-key: ${{ secrets.CORE_DIST_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: remask-core-dist
+      - name: Publish immutable public Release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DIST_REPO: ${{ github.repository_owner }}/remask-core-dist
+        run: |
+          version="${{ inputs.version || github.ref_name }}"
+          version="${version#core-v}"
+          tag="v${version}"
+          if gh release view "$tag" --repo "$DIST_REPO" >/dev/null 2>&1; then
+            echo "release already exists: $tag"
+            exit 1
+          fi
+          gh release create "$tag" --repo "$DIST_REPO" --draft --title "Remask Core ${version}" --notes "Signed Core runtime release ${version}"
+          gh release upload "$tag" --repo "$DIST_REPO" dist/*
+          gh release edit "$tag" --repo "$DIST_REPO" --draft=false

@@ -1,8 +1,9 @@
 # Desktop packaging
 
 All desktop packages use `remask-desktop/scripts/package.sh`. The script
-selects a Rust target, rebuilds the ONNX-enabled Go sidecar, stages models and
-the platform ONNX Runtime, runs Tauri, copies distributable files to
+selects a Rust target, downloads the locked Core binary and model assets from
+the public Core distribution Release, verifies their checksums, stages the
+platform ONNX Runtime, runs Tauri, copies distributable files to
 `artifacts/<platform>/<arch>/<version>/`, and writes `SHA256SUMS`.
 
 ## Standard commands
@@ -26,13 +27,32 @@ npm run package:linux
 These local commands may produce unsigned cross-build artifacts for
 development. A release build must set `REMASK_RELEASE=1`, which rejects
 non-native hosts and automatically requires code signing on macOS and Windows.
+The Core version in `scripts/packaging.lock.json` must be a concrete version for
+formal releases; `latest` is intended only for local development.
 Setting `REMASK_SIGN=0` is rejected in release mode. The Windows release
 workflow imports its signing certificate, builds on `windows-latest`, verifies
 the Authenticode signature, silently installs the NSIS package, loads the
 locked ONNX model through `remask-core -self-test`, starts the desktop
 executable, and uploads the artifact only after all checks pass.
 
-## ONNX Runtime inputs
+## Core and ONNX Runtime inputs
+
+The desktop build does not compile or check out the private Core source. It
+downloads `manifest.json` and the target archive from the public repository in
+the `core.repository` lock entry. The manifest and target archive are verified
+before extraction. Set `REMASK_CORE_VERSION` only for a local override of the
+locked version; formal releases should update and commit the lock file.
+
+For offline development, explicitly provide both local inputs:
+
+```bash
+REMASK_ALLOW_LOCAL_CORE=1 \
+REMASK_CORE_BINARY=/absolute/path/remask-core \
+REMASK_MODEL_ROOT=/absolute/path/models \
+npm run stage:core
+```
+
+The local override is rejected by formal builds unless explicitly enabled.
 
 The standard package command downloads the ONNX Runtime version and target
 listed in `scripts/packaging.lock.json`, verifies its SHA-256, and never reuses
