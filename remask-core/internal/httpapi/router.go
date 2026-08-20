@@ -383,7 +383,15 @@ func (r *Router) listAuditLogs(w http.ResponseWriter, request *http.Request) {
 		limit = parsed
 	}
 	query := audit.Query{Limit: limit, UpstreamID: request.URL.Query().Get("upstream_id"), Status: request.URL.Query().Get("status"), Search: request.URL.Query().Get("search")}
-	writeJSON(w, http.StatusOK, map[string]any{"logs": r.audits.ListSummaries(query)})
+	logs, err := r.audits.ListSummaries(query)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Printf("audit_list_failed error=%v", err)
+		}
+		writeError(w, http.StatusInternalServerError, "AUDIT_LIST_FAILED", "failed to load request logs")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"logs": logs})
 }
 
 func (r *Router) getAuditLog(w http.ResponseWriter, request *http.Request) {

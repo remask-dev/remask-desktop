@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -522,7 +523,7 @@ func (s *Store) List(query Query) []Entry {
 // ListSummaries returns only the columns needed by the audit log list. Large
 // field previews and raw exchanges stay in SQLite until a specific entry is
 // opened through Get.
-func (s *Store) ListSummaries(query Query) []Entry {
+func (s *Store) ListSummaries(query Query) ([]Entry, error) {
 	limit := query.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -548,7 +549,7 @@ func (s *Store) ListSummaries(query Query) []Entry {
 		response_bytes, entity_count, token_input, token_output, token_total, token_cached, error_code
 		FROM audit_entries WHERE `+strings.Join(clauses, " AND ")+` ORDER BY timestamp DESC LIMIT ?`, args...)
 	if err != nil {
-		return []Entry{}
+		return nil, fmt.Errorf("query audit summaries: %w", err)
 	}
 	defer rows.Close()
 	result := make([]Entry, 0, limit)
@@ -559,12 +560,15 @@ func (s *Store) ListSummaries(query Query) []Entry {
 			&entry.ProtectionMode, &entry.GatewayType, &entry.TargetHost, &entry.Method, &entry.Path, &entry.StatusCode, &entry.DurationMS,
 			&entry.Streaming, &entry.RequestBytes, &entry.ResponseBytes, &entry.EntityCount,
 			&entry.TokenUsage.Input, &entry.TokenUsage.Output, &entry.TokenUsage.Total, &entry.TokenUsage.Cached, &entry.ErrorCode); err != nil {
-			continue
+			return nil, fmt.Errorf("scan audit summary: %w", err)
 		}
 		entry.Timestamp, _ = time.Parse(timestampLayout, timestamp)
 		result = append(result, entry)
 	}
-	return result
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate audit summaries: %w", err)
+	}
+	return result, nil
 }
 
 // Get loads the complete audit entry, including field previews and any raw

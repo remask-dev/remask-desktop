@@ -124,7 +124,10 @@ func TestStorePersistsProxyGatewayTypeInSummariesAndDetails(t *testing.T) {
 	if err := store.Add(Entry{UpstreamID: "test", GatewayType: GatewayTypeProxy, TargetHost: "api.example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	summaries := store.ListSummaries(Query{Limit: 1})
+	summaries, err := store.ListSummaries(Query{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(summaries) != 1 || summaries[0].GatewayType != GatewayTypeProxy || summaries[0].TargetHost != "api.example.com" {
 		t.Fatalf("proxy gateway type missing from summary: %#v", summaries)
 	}
@@ -212,7 +215,10 @@ func TestStoreListsMetadataAndLoadsContentOnDemand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	summaries := store.ListSummaries(Query{Limit: 10})
+	summaries, err := store.ListSummaries(Query{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(summaries) != 1 {
 		t.Fatalf("summaries = %#v", summaries)
 	}
