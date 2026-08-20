@@ -345,7 +345,7 @@ sign_macos_resources() {
   local file
   local -a files=()
 
-  [[ "$sign_enabled" == "1" ]] || return
+  [[ "$sign_enabled" == "1" ]] || return 0
   while IFS= read -r -d '' file; do files+=("$file"); done < <(
     find "$tauri_dir/resources" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 2>/dev/null
   )

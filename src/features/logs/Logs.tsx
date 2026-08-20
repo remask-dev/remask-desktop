@@ -8,7 +8,9 @@ import { useLogDetailData, useLogsData } from "../../app/useCore";
 import { PageState } from "../../shared/ui/PageState";
 import { useApp } from "../../app/AppContext";
 
-const LOG_FILTER_STORAGE_KEY = "remask.logs.filters";
+// Bump the storage key when filter semantics change so an old persisted date
+// cannot silently hide all newly recorded requests after an app upgrade.
+const LOG_FILTER_STORAGE_KEY = "remask.logs.filters.v2";
 type StoredLogFilters = { query: string; date: string; protection: ProtectionFilter };
 
 function readStoredLogFilters(): StoredLogFilters {
@@ -29,7 +31,7 @@ function readStoredLogFilters(): StoredLogFilters {
 export function Logs() {
   const { t, dateLocale } = useI18n();
   const logsQuery = useLogsData();
-  if (logsQuery.isPending || !logsQuery.data) return <PageState pending={logsQuery.isPending} error={logsQuery.error} onRetry={() => void logsQuery.refetch()}/>;
+  if (logsQuery.isPending || logsQuery.isError || !logsQuery.data) return <PageState pending={logsQuery.isPending} error={logsQuery.error} onRetry={() => void logsQuery.refetch()}/>;
   return <LogsContent logs={logsQuery.data} t={t} dateLocale={dateLocale}/>;
 }
 
