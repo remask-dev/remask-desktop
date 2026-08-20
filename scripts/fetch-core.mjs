@@ -159,18 +159,26 @@ function assertSafeEntry(entry) {
   }
 }
 
+function archiveToolPath(value) {
+  if (process.platform !== "win32") return value;
+  const normalized = value.replaceAll("\\", "/");
+  const drive = normalized.match(/^([A-Za-z]):\/(.*)$/);
+  return drive ? `/${drive[1].toLowerCase()}/${drive[2]}` : normalized;
+}
+
 async function listArchiveEntries(archive) {
   const lower = archive.toLowerCase();
   const tarLocal = process.platform === "win32" ? ["--force-local"] : [];
+  const toolArchive = archiveToolPath(archive);
   if (lower.endsWith(".zip")) {
-    const result = await run("unzip", ["-Z1", archive]);
+    const result = await run("unzip", ["-Z1", toolArchive]);
     return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   }
   const args = lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
-    ? [...tarLocal, "-tzf", archive]
+    ? [...tarLocal, "-tzf", toolArchive]
     : lower.endsWith(".tar.zst")
-      ? [...tarLocal, "--zstd", "-tf", archive]
-      : [...tarLocal, "-tf", archive];
+      ? [...tarLocal, "--zstd", "-tf", toolArchive]
+      : [...tarLocal, "-tf", toolArchive];
   const result = await run("tar", args);
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
@@ -181,15 +189,17 @@ async function extractArchive(archive, destination) {
   await rm(destination, { recursive: true, force: true });
   await ensureDirectory(destination);
   const lower = archive.toLowerCase();
+  const tarLocal = process.platform === "win32" ? ["--force-local"] : [];
+  const toolArchive = archiveToolPath(archive);
+  const toolDestination = archiveToolPath(destination);
   if (lower.endsWith(".zip")) {
-    await run("unzip", ["-q", archive, "-d", destination]);
+    await run("unzip", ["-q", toolArchive, "-d", toolDestination]);
   } else {
-    const tarLocal = process.platform === "win32" ? ["--force-local"] : [];
     const args = lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
-      ? [...tarLocal, "-xzf", archive, "-C", destination]
+      ? [...tarLocal, "-xzf", toolArchive, "-C", toolDestination]
       : lower.endsWith(".tar.zst")
-        ? [...tarLocal, "--zstd", "-xf", archive, "-C", destination]
-        : [...tarLocal, "-xf", archive, "-C", destination];
+        ? [...tarLocal, "--zstd", "-xf", toolArchive, "-C", toolDestination]
+        : [...tarLocal, "-xf", toolArchive, "-C", toolDestination];
     await run("tar", args);
   }
 }
