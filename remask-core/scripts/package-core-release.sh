@@ -42,10 +42,10 @@ stage="$(mktemp -d "${TMPDIR:-/tmp}/remask-core-release.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/core/runtime"
 
-ldflags=("-s" "-w" "-X" "github.com/remask/remask-core/internal/buildinfo.Version=$version" "-X" "github.com/remask/remask-core/internal/buildinfo.APIVersion=${REMASK_CORE_API_VERSION:-v1}" "-X" "github.com/remask/remask-core/internal/buildinfo.BuildID=${REMASK_CORE_BUILD_ID:-${GITHUB_RUN_ID:-private}}" "-X" "github.com/remask/remask-core/internal/buildinfo.BuildTime=${REMASK_CORE_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}")
+ldflags=("-s" "-w" "-X" "github.com/remask-dev/remask-core/internal/buildinfo.Version=$version" "-X" "github.com/remask-dev/remask-core/internal/buildinfo.APIVersion=${REMASK_CORE_API_VERSION:-v1}" "-X" "github.com/remask-dev/remask-core/internal/buildinfo.BuildID=${REMASK_CORE_BUILD_ID:-${GITHUB_RUN_ID:-private}}" "-X" "github.com/remask-dev/remask-core/internal/buildinfo.BuildTime=${REMASK_CORE_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}")
 if [[ -n "${REMASK_LICENSE_PUBLIC_KEY:-}" ]]; then
   [[ "$REMASK_LICENSE_PUBLIC_KEY" =~ ^[A-Za-z0-9+/=_-]+$ ]] || die "REMASK_LICENSE_PUBLIC_KEY must be Base64"
-  ldflags+=("-X" "github.com/remask/remask-core/internal/license.EmbeddedPublicKey=$REMASK_LICENSE_PUBLIC_KEY" "-X" "github.com/remask/remask-core/internal/license.EmbeddedKeyID=${REMASK_LICENSE_KEY_ID:-prod-v1}")
+  ldflags+=("-X" "github.com/remask-dev/remask-core/internal/license.EmbeddedPublicKey=$REMASK_LICENSE_PUBLIC_KEY" "-X" "github.com/remask-dev/remask-core/internal/license.EmbeddedKeyID=${REMASK_LICENSE_KEY_ID:-prod-v1}")
 fi
 go_env=(GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=1)
 if [[ -n "${REMASK_GO_CC:-}" ]]; then go_env+=(CC="$REMASK_GO_CC"); fi

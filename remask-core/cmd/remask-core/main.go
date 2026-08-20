@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/remask/remask-core/internal/app"
-	"github.com/remask/remask-core/internal/forwardproxy"
-	"github.com/remask/remask-core/internal/model"
+	"github.com/remask-dev/remask-core/internal/app"
+	"github.com/remask-dev/remask-core/internal/forwardproxy"
+	"github.com/remask-dev/remask-core/internal/model"
 )
 
 func main() {

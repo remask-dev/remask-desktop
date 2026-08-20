@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/remask/remask-core/internal/gateway"
-	"github.com/remask/remask-core/internal/mitm"
-	"github.com/remask/remask-core/internal/proxyrule"
+	"github.com/remask-dev/remask-core/internal/gateway"
+	"github.com/remask-dev/remask-core/internal/mitm"
+	"github.com/remask-dev/remask-core/internal/proxyrule"
 )
 
 const connectTimeout = 15 * time.Second

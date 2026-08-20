@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/remask/remask-core/internal/scope"
+	"github.com/remask-dev/remask-core/internal/scope"
 )
 
 func TestRedactReturnsTextAndEntitiesThenRestores(t *testing.T) {

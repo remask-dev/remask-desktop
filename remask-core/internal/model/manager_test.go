@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/remask/remask-core/internal/operation"
-	"github.com/remask/remask-core/internal/pii"
+	"github.com/remask-dev/remask-core/internal/operation"
+	"github.com/remask-dev/remask-core/internal/pii"
 )
 
 func TestScanValidatesModelPackage(t *testing.T) {

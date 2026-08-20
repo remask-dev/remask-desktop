@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/remask/remask-core/internal/app"
-	"github.com/remask/remask-core/internal/forwardproxy"
+	"github.com/remask-dev/remask-core/internal/app"
+	"github.com/remask-dev/remask-core/internal/forwardproxy"
 )
 
 func TestConfiguredHTTPSUpstreamIsRedactedAndRestored(t *testing.T) {

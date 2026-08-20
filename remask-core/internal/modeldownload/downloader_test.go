@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/remask/remask-core/internal/model"
+	"github.com/remask-dev/remask-core/internal/model"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

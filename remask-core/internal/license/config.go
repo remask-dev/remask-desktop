@@ -15,7 +15,7 @@ const (
 // EmbeddedPublicKey defaults to the production verification key kept in this
 // private repository. It may be replaced at build time during key rotation:
 //
-//	-ldflags "-X github.com/remask/remask-core/internal/license.EmbeddedPublicKey=<base64>"
+//	-ldflags "-X github.com/remask-dev/remask-core/internal/license.EmbeddedPublicKey=<base64>"
 //
 // Only the public verification key belongs in the client. The corresponding
 // private signing key must never be committed or included in a build.

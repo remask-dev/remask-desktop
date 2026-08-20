@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/remask/remask-core/internal/modeldownload"
+	"github.com/remask-dev/remask-core/internal/modeldownload"
 )
 
 func main() {

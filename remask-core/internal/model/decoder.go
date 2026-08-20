@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/remask/remask-core/internal/pii"
+	"github.com/remask-dev/remask-core/internal/pii"
 )
 
 type tokenPrediction struct {

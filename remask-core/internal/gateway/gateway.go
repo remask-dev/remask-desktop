@@ -14,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/remask/remask-core/internal/audit"
-	"github.com/remask/remask-core/internal/document"
-	"github.com/remask/remask-core/internal/pii"
-	"github.com/remask/remask-core/internal/profile"
-	streamrestore "github.com/remask/remask-core/internal/stream"
-	"github.com/remask/remask-core/internal/stream/sse"
-	"github.com/remask/remask-core/internal/upstream"
+	"github.com/remask-dev/remask-core/internal/audit"
+	"github.com/remask-dev/remask-core/internal/document"
+	"github.com/remask-dev/remask-core/internal/pii"
+	"github.com/remask-dev/remask-core/internal/profile"
+	streamrestore "github.com/remask-dev/remask-core/internal/stream"
+	"github.com/remask-dev/remask-core/internal/stream/sse"
+	"github.com/remask-dev/remask-core/internal/upstream"
 )
 
 const maxBodyBytes = 8 << 20

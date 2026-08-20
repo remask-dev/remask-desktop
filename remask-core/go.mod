@@ -1,4 +1,4 @@
-module github.com/remask/remask-core
+module github.com/remask-dev/remask-core
 
 go 1.25.0
 

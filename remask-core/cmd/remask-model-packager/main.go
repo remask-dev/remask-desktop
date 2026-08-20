@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/remask/remask-core/internal/model"
+	"github.com/remask-dev/remask-core/internal/model"
 )
 
 func main() {

@@ -15,7 +15,7 @@ import (
 
 	ort "github.com/yalue/onnxruntime_go"
 
-	"github.com/remask/remask-core/internal/pii"
+	"github.com/remask-dev/remask-core/internal/pii"
 )
 
 type onnxRuntime struct {

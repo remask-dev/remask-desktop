@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/remask/remask-core/internal/license"
+	"github.com/remask-dev/remask-core/internal/license"
 )
 
 func main() {

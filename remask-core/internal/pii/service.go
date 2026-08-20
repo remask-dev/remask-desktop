@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/remask/remask-core/internal/scope"
+	"github.com/remask-dev/remask-core/internal/scope"
 )
 
 var tokenPattern = regexp.MustCompile(`<([A-Z][A-Z0-9_]*):([A-F0-9]{4})>`)

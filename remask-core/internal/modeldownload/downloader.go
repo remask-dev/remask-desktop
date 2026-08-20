@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/remask/remask-core/internal/model"
+	"github.com/remask-dev/remask-core/internal/model"
 )
 
 type Config struct {
