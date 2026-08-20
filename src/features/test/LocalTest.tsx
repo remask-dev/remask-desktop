@@ -8,7 +8,7 @@ import { useI18n } from "../../shared/i18n/I18n";
 import { Button } from "../../shared/ui/Button";
 import { Textarea } from "../../shared/ui/Textarea";
 
-const SAMPLE = "Olivia Bennett, born April 18, 1987, lives at 742 Evergreen Terrace, Springfield, IL 62704. Contact her at +1 (202) 555-0147 or olivia.bennett@example.com. Account: 4839201756; last login IP: 203.0.113.42.";
+const SAMPLE = "During Tuesday's review, Jordan Patel asked me to send the revised invoice to jordan.patel@example.org and call him at +1 (212) 555-0164. He will be working from 221B Baker Street, London NW1 6XE, after signing in from 198.51.100.64.";
 
 export function LocalTest() {
   const { t } = useI18n();
