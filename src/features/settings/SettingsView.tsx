@@ -15,6 +15,7 @@ import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
 import { hasAdvancedLicense } from "../../shared/license";
 import { AdvancedBadge } from "../../shared/ui/Status";
+import { localeConfig, localeOptions, resolveLocale } from "../../shared/i18n/locales";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 
@@ -193,7 +194,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
     invalid: t("licenseInvalid"), key_unconfigured: t("licenseKeyUnconfigured"),
     device_unavailable: t("licenseDeviceUnavailable"),
   };
-  const licenseDate = license.expires_at ? new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium" }).format(new Date(license.expires_at)) : t("notAvailable");
+  const licenseDate = license.expires_at ? new Intl.DateTimeFormat(localeConfig[locale].dateLocale, { dateStyle: "medium" }).format(new Date(license.expires_at)) : t("notAvailable");
   const licenseSection = <SettingsSection tone="license" title={t("licenseSettings")} subtitle={t("licenseSettingsSub")}>
     <SettingRow label={t("licenseStatus")} description={license.status === "valid" && license.edition ? `${licenseStatusLabels[license.status]} · ${license.edition}` : licenseStatusLabels[license.status]}><span className={`license-status license-status--${license.status}`}>{licenseStatusLabels[license.status]}</span></SettingRow>
     <SettingRow label={t("deviceId")} description={t("deviceIdSub")}><button className="license-device" type="button" disabled={!license.device_id} onClick={() => void copyDeviceID()}><code>{license.device_id || t("notAvailable")}</code><small>{t("copy")}</small></button></SettingRow>
@@ -207,7 +208,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
 
   return <div className="settings-page"><div className="settings-grid">
     <SettingsSection tone="interface" title={t("applicationSettings")} subtitle={t("applicationSettingsSub")}>
-      <SettingRow label={t("language")} description={locale === "zh" ? "简体中文" : locale === "ja" ? "日本語" : locale === "de" ? "Deutsch" : "English"}><Select className="settings-control" value={locale} onValueChange={value => setLocale(value as "zh" | "en" | "ja" | "de")} options={[{ value: "en", label: "English" }, { value: "zh", label: "简体中文" }, { value: "ja", label: "日本語" }, { value: "de", label: "Deutsch" }]}/></SettingRow>
+      <SettingRow label={t("language")} description={localeConfig[locale].displayName}><Select className="settings-control" value={locale} onValueChange={value => { const next = resolveLocale(value); if (next) setLocale(next); }} options={localeOptions}/></SettingRow>
       {inTauri && <SettingRow last label={t("autostart")} description={t("autostartSub")}><Switch ariaLabel={t("autostart")} disabled={!autostartReady} checked={autostart} onCheckedChange={toggleAutostart}/></SettingRow>}
     </SettingsSection>
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>

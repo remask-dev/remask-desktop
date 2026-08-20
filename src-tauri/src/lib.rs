@@ -566,17 +566,65 @@ fn set_tray_locale(app: AppHandle, locale: String) -> Result<(), String> {
     tray.set_menu(Some(menu)).map_err(|error| error.to_string())
 }
 
+struct TrayLabels {
+    show_main_window: &'static str,
+    terminal: &'static str,
+    browser: &'static str,
+    choose_another_app: &'static str,
+    protected_launch: &'static str,
+    copy_environment: &'static str,
+    quit: &'static str,
+}
+
+const TRAY_LABELS_EN: TrayLabels = TrayLabels {
+    show_main_window: "Show Main Window",
+    terminal: "Terminal",
+    browser: "Browser",
+    choose_another_app: "Choose Another App…",
+    protected_launch: "Protected Launch",
+    copy_environment: "Copy Environment Variables",
+    quit: "Quit",
+};
+const TRAY_LABELS_ZH: TrayLabels = TrayLabels {
+    show_main_window: "显示主窗口",
+    terminal: "终端",
+    browser: "浏览器",
+    choose_another_app: "选择其他应用…",
+    protected_launch: "安全启动",
+    copy_environment: "复制环境变量",
+    quit: "退出",
+};
+const TRAY_LABELS_JA: TrayLabels = TrayLabels {
+    show_main_window: "メインウィンドウを表示",
+    terminal: "ターミナル",
+    browser: "ブラウザ",
+    choose_another_app: "別のアプリを選択…",
+    protected_launch: "保護された起動",
+    copy_environment: "環境変数をコピー",
+    quit: "終了",
+};
+const TRAY_LABELS_DE: TrayLabels = TrayLabels {
+    show_main_window: "Hauptfenster anzeigen",
+    terminal: "Terminal",
+    browser: "Browser",
+    choose_another_app: "Andere App auswählen…",
+    protected_launch: "Geschützter Start",
+    copy_environment: "Umgebungsvariablen kopieren",
+    quit: "Beenden",
+};
+
+fn tray_labels(locale: &str) -> &'static TrayLabels {
+    match locale {
+        "zh" => &TRAY_LABELS_ZH,
+        "ja" => &TRAY_LABELS_JA,
+        "de" => &TRAY_LABELS_DE,
+        _ => &TRAY_LABELS_EN,
+    }
+}
+
 fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::Wry>> {
-    let chinese = locale == "zh";
-    let japanese = locale == "ja";
-    let german = locale == "de";
-    let show_item = MenuItem::with_id(
-        app,
-        "show",
-        if chinese { "显示主窗口" } else if japanese { "メインウィンドウを表示" } else if german { "Hauptfenster anzeigen" } else { "Show Main Window" },
-        true,
-        None::<&str>,
-    )?;
+    let labels = tray_labels(locale);
+    let show_item = MenuItem::with_id(app, "show", labels.show_main_window, true, None::<&str>)?;
     let claude_item = MenuItem::with_id(
         app,
         "safe-launch-claude-code",
@@ -592,38 +640,33 @@ fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::W
         true,
         None::<&str>,
     )?;
-    let opencode_item = MenuItem::with_id(
-        app,
-        "safe-launch-opencode",
-        "OpenCode",
-        true,
-        None::<&str>,
-    )?;
+    let opencode_item =
+        MenuItem::with_id(app, "safe-launch-opencode", "OpenCode", true, None::<&str>)?;
     let terminal_item = MenuItem::with_id(
         app,
         "safe-launch-terminal",
-        if chinese { "终端" } else if japanese { "ターミナル" } else if german { "Terminal" } else { "Terminal" },
+        labels.terminal,
         true,
         None::<&str>,
     )?;
     let browser_item = MenuItem::with_id(
         app,
         "safe-launch-browser",
-        if chinese { "浏览器" } else if japanese { "ブラウザ" } else if german { "Browser" } else { "Browser" },
+        labels.browser,
         true,
         None::<&str>,
     )?;
     let other_app_item = MenuItem::with_id(
         app,
         "safe-launch-other",
-        if chinese { "选择其他应用…" } else if japanese { "別のアプリを選択…" } else if german { "Andere App auswählen…" } else { "Choose Another App…" },
+        labels.choose_another_app,
         true,
         None::<&str>,
     )?;
     let safe_launch_menu = Submenu::with_id_and_items(
         app,
         "safe-launch",
-        if chinese { "安全启动" } else if japanese { "保護された起動" } else if german { "Geschützter Start" } else { "Protected Launch" },
+        labels.protected_launch,
         true,
         &[
             &claude_item,
@@ -638,17 +681,11 @@ fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::W
     let copy_environment_item = MenuItem::with_id(
         app,
         "copy-environment",
-        if chinese { "复制环境变量" } else if japanese { "環境変数をコピー" } else if german { "Umgebungsvariablen kopieren" } else { "Copy Environment Variables" },
+        labels.copy_environment,
         true,
         None::<&str>,
     )?;
-    let quit_item = MenuItem::with_id(
-        app,
-        "quit",
-        if chinese { "退出" } else if japanese { "終了" } else if german { "Beenden" } else { "Quit" },
-        true,
-        None::<&str>,
-    )?;
+    let quit_item = MenuItem::with_id(app, "quit", labels.quit, true, None::<&str>)?;
     Menu::with_items(
         app,
         &[
