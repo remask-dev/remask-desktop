@@ -161,15 +161,16 @@ function assertSafeEntry(entry) {
 
 async function listArchiveEntries(archive) {
   const lower = archive.toLowerCase();
+  const tarLocal = process.platform === "win32" ? ["--force-local"] : [];
   if (lower.endsWith(".zip")) {
     const result = await run("unzip", ["-Z1", archive]);
     return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   }
   const args = lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
-    ? ["-tzf", archive]
+    ? [...tarLocal, "-tzf", archive]
     : lower.endsWith(".tar.zst")
-      ? ["--zstd", "-tf", archive]
-      : ["-tf", archive];
+      ? [...tarLocal, "--zstd", "-tf", archive]
+      : [...tarLocal, "-tf", archive];
   const result = await run("tar", args);
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
@@ -183,11 +184,12 @@ async function extractArchive(archive, destination) {
   if (lower.endsWith(".zip")) {
     await run("unzip", ["-q", archive, "-d", destination]);
   } else {
+    const tarLocal = process.platform === "win32" ? ["--force-local"] : [];
     const args = lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
-      ? ["-xzf", archive, "-C", destination]
+      ? [...tarLocal, "-xzf", archive, "-C", destination]
       : lower.endsWith(".tar.zst")
-        ? ["--zstd", "-xf", archive, "-C", destination]
-        : ["-xf", archive, "-C", destination];
+        ? [...tarLocal, "--zstd", "-xf", archive, "-C", destination]
+        : [...tarLocal, "-xf", archive, "-C", destination];
     await run("tar", args);
   }
 }
