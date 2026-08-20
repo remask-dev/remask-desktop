@@ -87,6 +87,7 @@ pub fn launch_preset(
     validate_certificate(&certificate)?;
     match preset {
         "claude-code" => platform_launch_client("claude", &proxy_url, &certificate),
+        "opencode" => platform_launch_client("opencode", &proxy_url, &certificate),
         "codex-cli" => platform_launch_client("codex", &proxy_url, &certificate),
         "codex" => platform_launch_codex(&proxy_url, &certificate),
         "terminal" => platform_launch_client(platform_shell_executable(), &proxy_url, &certificate),

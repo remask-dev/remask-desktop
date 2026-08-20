@@ -8,7 +8,7 @@ import { queryKeys } from "../../app/useCore";
 import { connection, coreApi } from "../../shared/api/client";
 import { useI18n } from "../../shared/i18n/I18n";
 
-type QuickLaunchPreset = "claude-code" | "codex" | "codex-cli" | "terminal" | "browser";
+type QuickLaunchPreset = "claude-code" | "opencode" | "codex" | "codex-cli" | "terminal" | "browser";
 type TrayLaunch = QuickLaunchPreset | "other";
 
 /** Bridge native tray actions to the same protected-launch behavior as the UI. */

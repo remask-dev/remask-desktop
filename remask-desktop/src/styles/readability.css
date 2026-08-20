@@ -330,6 +330,9 @@ main {
   color: #57687b;
   font-size: var(--font-caption);
   font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric strong {

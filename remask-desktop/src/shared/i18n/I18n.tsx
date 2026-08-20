@@ -14,7 +14,7 @@ function readStoredLocale(): Locale | null {
   if (typeof window === "undefined") return null;
   try {
     const stored = window.localStorage.getItem(localeKey);
-    return stored === "zh" || stored === "en" ? stored : null;
+    return stored === "zh" || stored === "en" || stored === "ja" || stored === "de" ? stored : null;
   } catch {
     return null;
   }
@@ -23,7 +23,7 @@ function readStoredLocale(): Locale | null {
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, update] = useState<Locale>(() => readStoredLocale() ?? "en");
   useLayoutEffect(() => {
-    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en-US";
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : locale === "de" ? "de-DE" : "en-US";
   }, [locale]);
   const value = useMemo<I18nValue>(() => ({
     locale,
@@ -33,7 +33,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       update(next);
     },
     t: (key) => messages[locale][key],
-    dateLocale: locale === "zh" ? "zh-CN" : "en-US",
+    dateLocale: locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : locale === "de" ? "de-DE" : "en-US",
   }), [locale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
