@@ -1,0 +1,53 @@
+name: Package macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  package-macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: macos-package-inputs-${{ hashFiles('scripts/packaging.lock.json') }}
+      - run: npm ci
+      - name: Require pinned Core release
+        run: node -e 'const lock=require("./scripts/packaging.lock.json"); if (!lock.core?.version || lock.core.version === "latest" || !/^[0-9]+\\.[0-9]+\\.[0-9]+/.test(lock.core.version) || !/^[a-f0-9]{64}$/i.test(lock.core.manifestSha256 || "")) throw new Error("pin Core version and manifestSha256 before release")'
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"; test -n "$APPLE_CERTIFICATE_PASSWORD"; test -n "$APPLE_KEYCHAIN_PASSWORD"
+          certificate_path="$RUNNER_TEMP/remask-signing.p12"; keychain_path="$RUNNER_TEMP/remask-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$certificate_path"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"; security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"; rm -f "$certificate_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path" login.keychain-db; security default-keychain -s "$keychain_path"
+      - name: Build signed package
+        env:
+          REMASK_RELEASE: "1"
+          REMASK_SIGN: "1"
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run package:macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remask-macos-${{ github.sha }}
+          path: artifacts/macos/
