@@ -675,14 +675,20 @@ func (r *Router) activeModel(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Router) activateModel(w http.ResponseWriter, request *http.Request) {
-	if r.licenses.EnforceFeatures() && !r.licenses.Advanced() {
-		writeError(w, http.StatusForbidden, "LICENSE_FEATURE_REQUIRED", "downloading or switching models requires an advanced license")
+	modelID := request.PathValue("model_id")
+	item, err := r.models.Get(modelID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "MODEL_NOT_FOUND", "model package is not configured")
+		return
+	}
+	if r.licenses.EnforceFeatures() && !r.licenses.Advanced() && !item.BuiltIn {
+		writeError(w, http.StatusForbidden, "LICENSE_FEATURE_REQUIRED", "activating custom models requires an advanced license")
 		return
 	}
 	// A model swap changes detection output. Clear before the asynchronous load
 	// starts so no result from the previous model can leak into the new one.
 	r.pii.ClearEntityCache()
-	op, err := r.models.Activate(request.PathValue("model_id"))
+	op, err := r.models.Activate(modelID)
 	if err != nil {
 		status, code := http.StatusUnprocessableEntity, "MODEL_ACTIVATE_FAILED"
 		if errors.Is(err, model.ErrNotFound) {
