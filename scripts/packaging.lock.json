@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "core": {
     "repository": "remask-dev/remask-core-dist",
-    "version": "latest",
+    "version": "1.0.0",
     "manifestAsset": "manifest.json",
     "apiVersion": "v1",
-    "manifestSha256": ""
+    "manifestSha256": "6430671154f4abd23abff921d3644c88296b1f584052648e1233e2bf7cfd1e0c"
   },
   "onnxRuntime": {
     "version": "1.28.0",
@@ -47,7 +47,7 @@
       "repo": "openai/privacy-filter",
       "revision": "7ffa9a043d54d1be65afb281eddf0ffbe629385b",
       "variant": "q4f16",
-      "manifestSha256": "155eaabaea359aaccc3171bb25b15e575205bcea6f3b681b2c2e9db54d4391d5",
+      "manifestSha256": "441f73bb192e34102c86d84bf10975dd2fad21c01646b1767deb03d331a1e283",
       "files": {
         "config.json": "b2b26a4a4a000639ad30b0c264adbefe365bdb567fbd7bb27303b8c438375bd1",
         "labels.json": "67f1075901da866be778e7ac92ed5bf98e7aadfa856e5ccc14c8cf8b5c1738d8",
