@@ -9,12 +9,13 @@ import { connection, coreApi } from "../../shared/api/client";
 import { useI18n } from "../../shared/i18n/I18n";
 import type { MessageKey } from "../../shared/i18n/messages";
 
-export type QuickLaunchPreset = "claude-code" | "codex" | "codex-cli" | "terminal" | "browser";
+export type QuickLaunchPreset = "claude-code" | "opencode" | "codex" | "codex-cli" | "terminal" | "browser";
 
 const launchOptions: Array<{ value: QuickLaunchPreset; label: MessageKey; icon: ReactNode }> = [
   { value: "claude-code", label: "claudeCode", icon: <Bot size={15}/> },
   { value: "codex", label: "codexApp", icon: <AppWindow size={15}/> },
   { value: "codex-cli", label: "codexCLI", icon: <Terminal size={15}/> },
+  { value: "opencode", label: "openCode", icon: <Terminal size={15}/> },
   { value: "browser", label: "browserApp", icon: <Globe2 size={15}/> },
   { value: "terminal", label: "terminalApp", icon: <SquareTerminal size={15}/> },
 ];

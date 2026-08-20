@@ -568,14 +568,12 @@ fn set_tray_locale(app: AppHandle, locale: String) -> Result<(), String> {
 
 fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let chinese = locale == "zh";
+    let japanese = locale == "ja";
+    let german = locale == "de";
     let show_item = MenuItem::with_id(
         app,
         "show",
-        if chinese {
-            "显示主窗口"
-        } else {
-            "Show Main Window"
-        },
+        if chinese { "显示主窗口" } else if japanese { "メインウィンドウを表示" } else if german { "Hauptfenster anzeigen" } else { "Show Main Window" },
         true,
         None::<&str>,
     )?;
@@ -594,44 +592,44 @@ fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::W
         true,
         None::<&str>,
     )?;
+    let opencode_item = MenuItem::with_id(
+        app,
+        "safe-launch-opencode",
+        "OpenCode",
+        true,
+        None::<&str>,
+    )?;
     let terminal_item = MenuItem::with_id(
         app,
         "safe-launch-terminal",
-        if chinese { "终端" } else { "Terminal" },
+        if chinese { "终端" } else if japanese { "ターミナル" } else if german { "Terminal" } else { "Terminal" },
         true,
         None::<&str>,
     )?;
     let browser_item = MenuItem::with_id(
         app,
         "safe-launch-browser",
-        if chinese { "浏览器" } else { "Browser" },
+        if chinese { "浏览器" } else if japanese { "ブラウザ" } else if german { "Browser" } else { "Browser" },
         true,
         None::<&str>,
     )?;
     let other_app_item = MenuItem::with_id(
         app,
         "safe-launch-other",
-        if chinese {
-            "选择其他应用…"
-        } else {
-            "Choose Another App…"
-        },
+        if chinese { "选择其他应用…" } else if japanese { "別のアプリを選択…" } else if german { "Andere App auswählen…" } else { "Choose Another App…" },
         true,
         None::<&str>,
     )?;
     let safe_launch_menu = Submenu::with_id_and_items(
         app,
         "safe-launch",
-        if chinese {
-            "安全启动"
-        } else {
-            "Protected Launch"
-        },
+        if chinese { "安全启动" } else if japanese { "保護された起動" } else if german { "Geschützter Start" } else { "Protected Launch" },
         true,
         &[
             &claude_item,
             &codex_item,
             &codex_cli_item,
+            &opencode_item,
             &terminal_item,
             &browser_item,
             &other_app_item,
@@ -640,18 +638,14 @@ fn build_tray_menu(app: &AppHandle, locale: &str) -> tauri::Result<Menu<tauri::W
     let copy_environment_item = MenuItem::with_id(
         app,
         "copy-environment",
-        if chinese {
-            "复制环境变量"
-        } else {
-            "Copy Environment Variables"
-        },
+        if chinese { "复制环境变量" } else if japanese { "環境変数をコピー" } else if german { "Umgebungsvariablen kopieren" } else { "Copy Environment Variables" },
         true,
         None::<&str>,
     )?;
     let quit_item = MenuItem::with_id(
         app,
         "quit",
-        if chinese { "退出" } else { "Quit" },
+        if chinese { "退出" } else if japanese { "終了" } else if german { "Beenden" } else { "Quit" },
         true,
         None::<&str>,
     )?;
@@ -710,6 +704,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
                     "safe-launch-claude-code" => emit_tray_launch(app, "claude-code"),
+                    "safe-launch-opencode" => emit_tray_launch(app, "opencode"),
                     "safe-launch-codex" => emit_tray_launch(app, "codex"),
                     "safe-launch-codex-cli" => emit_tray_launch(app, "codex-cli"),
                     "safe-launch-terminal" => emit_tray_launch(app, "terminal"),

@@ -207,7 +207,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
 
   return <div className="settings-page"><div className="settings-grid">
     <SettingsSection tone="interface" title={t("applicationSettings")} subtitle={t("applicationSettingsSub")}>
-      <SettingRow label={t("language")} description={locale === "zh" ? "简体中文" : "English"}><Select className="settings-control" value={locale} onValueChange={value => setLocale(value as "zh" | "en")} options={[{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }]}/></SettingRow>
+      <SettingRow label={t("language")} description={locale === "zh" ? "简体中文" : locale === "ja" ? "日本語" : locale === "de" ? "Deutsch" : "English"}><Select className="settings-control" value={locale} onValueChange={value => setLocale(value as "zh" | "en" | "ja" | "de")} options={[{ value: "en", label: "English" }, { value: "zh", label: "简体中文" }, { value: "ja", label: "日本語" }, { value: "de", label: "Deutsch" }]}/></SettingRow>
       {inTauri && <SettingRow last label={t("autostart")} description={t("autostartSub")}><Switch ariaLabel={t("autostart")} disabled={!autostartReady} checked={autostart} onCheckedChange={toggleAutostart}/></SettingRow>}
     </SettingsSection>
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
