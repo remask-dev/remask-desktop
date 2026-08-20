@@ -35,6 +35,14 @@ function modelLabelRows(models: ModelPackage[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))].map(value => ({ value }));
 }
 
+function entityLabel(locale: keyof typeof entityFriendlyLabels, t: (key: MessageKey) => string, value: string) {
+  const raw = value.trim();
+  const key = raw.toUpperCase();
+  const messageKey = entityLabels[key];
+  const localized = entityFriendlyLabels[locale][key as keyof typeof entityFriendlyLabels.zh];
+  return (messageKey ? t(messageKey) : localized) ?? (raw || t("entityCustom"));
+}
+
 export function Rules() {
   const query = useRulesData();
   if (query.isPending || !query.policy || !query.models) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
@@ -93,7 +101,7 @@ function RulesContent({ data }: { data: { policy: PolicySettings; models: ModelP
   };
 
   return <div className="rules-page">
-    <section className="entity-controls"><div className="entity-controls__heading"><span className="rules-icon"><ShieldCheck size={17}/></span><div><h2>{t("entityProtection")}</h2><p>{t("entityProtectionSub")}</p></div></div><div className="entity-toggle-grid">{labels.map(entity => { const messageKey = entityLabels[entity.value]; const raw = entity.value.trim(); const key = raw.toUpperCase(); const label = messageKey ? t(messageKey) : entityFriendlyLabels[locale][key as keyof typeof entityFriendlyLabels.zh] || raw || (locale === "zh" ? "未命名实体" : "Unnamed entity"); const configured = policy.entity_types.find(item => item.type === raw); const enabled = configured?.enabled !== false; return <label key={raw || "unnamed-entity"} className={enabled ? "is-enabled" : ""}><span><strong>{label}</strong><code>{raw || "UNKNOWN"}</code></span><Switch ariaLabel={`${label} · ${raw || "UNKNOWN"}`} checked={enabled} onCheckedChange={checked => patchEntity(raw || "UNKNOWN", checked)}/></label>; })}</div></section>
+    <section className="entity-controls"><div className="entity-controls__heading"><span className="rules-icon"><ShieldCheck size={17}/></span><div><h2>{t("entityProtection")}</h2><p>{t("entityProtectionSub")}</p></div></div><div className="entity-toggle-grid">{labels.map(entity => { const raw = entity.value.trim(); const label = entityLabel(locale, t, raw); const configured = policy.entity_types.find(item => item.type === raw); const enabled = configured?.enabled !== false; return <label key={raw || "unnamed-entity"} className={enabled ? "is-enabled" : ""}><span><strong>{label}</strong><code>{raw || "UNKNOWN"}</code></span><Switch ariaLabel={`${label} · ${raw || "UNKNOWN"}`} checked={enabled} onCheckedChange={checked => patchEntity(raw || "UNKNOWN", checked)}/></label>; })}</div></section>
     <section className="custom-rules">
       <header className="rules-toolbar"><div><span className="rules-icon rules-icon--custom"><ListPlus size={17}/></span><div><h2 className="feature-title-with-badge">{t("customRules")}<AdvancedBadge>{t("advancedPlanBadge")}</AdvancedBadge></h2><p>{enabledRuleCount} / {customRuleCount} {t("enabled")}</p></div></div><Button icon={<Plus size={13}/>} onClick={addRule}>{t("addRule")}</Button></header>
       <div className="rules-container">
