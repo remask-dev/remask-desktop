@@ -3,9 +3,10 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 desktop_dir="$(cd "$script_dir/.." && pwd)"
-workspace_dir="$(cd "$desktop_dir/.." && pwd)"
+repository_dir="$(git -C "$desktop_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "$repository_dir" ]] || repository_dir="$desktop_dir"
 tauri_dir="$desktop_dir/src-tauri"
-artifacts_dir="$workspace_dir/artifacts"
+artifacts_dir="${REMASK_ARTIFACTS_DIR:-$repository_dir/artifacts}"
 packaging_lock="$script_dir/packaging.lock.json"
 windows_runtime_stage_dir="$tauri_dir/resources/windows-runtime"
 windows_vc_runtime_files=(
