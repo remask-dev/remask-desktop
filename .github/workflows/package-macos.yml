@@ -9,6 +9,12 @@ on:
         type: boolean
         default: true
   workflow_call:
+    inputs:
+      release:
+        description: "Require a signed and notarized release package"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   package-macos:
@@ -40,13 +46,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           requested=0
-          if [[ "${{ github.event_name }}" == "workflow_call" || "${{ inputs.signed }}" == "true" ]]; then requested=1; fi
+          if [[ "${{ inputs.release }}" == "true" || "${{ inputs.signed }}" == "true" ]]; then requested=1; fi
           if [[ "$requested" == 1 && -n "$APPLE_CERTIFICATE" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_KEYCHAIN_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_ID" && -n "$APPLE_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
             echo "REMASK_SIGN_ENABLED=1" >> "$GITHUB_ENV"
             echo "Apple signing requested and credentials are present"
           else
             echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
-            if [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+            if [[ "${{ inputs.release }}" == "true" ]]; then
               echo "Apple signing credentials are required for a Desktop Release" >&2
               exit 1
             fi
@@ -75,8 +81,11 @@ jobs:
             echo "Apple signing certificate import failed; continuing with unsigned package"
             echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
           fi
+      - name: Require imported Apple signing certificate
+        if: ${{ inputs.release }}
+        run: test "$REMASK_SIGN_ENABLED" = "1"
+
       - name: Build package
-        if: ${{ github.event_name != 'workflow_call' || env.REMASK_SIGN_ENABLED == '1' }}
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -86,7 +95,7 @@ jobs:
           export REMASK_RELEASE=0 REMASK_SIGN=0
           if [[ "$REMASK_SIGN_ENABLED" == "1" ]]; then
             export REMASK_RELEASE=1 REMASK_SIGN=1
-            if [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+            if [[ "${{ inputs.release }}" == "true" ]]; then
               npm run package:macos
             elif ! npm run package:macos; then
               echo "Signed macOS package failed; retrying unsigned"

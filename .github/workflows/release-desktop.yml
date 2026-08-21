@@ -39,12 +39,16 @@ jobs:
     name: Package macOS
     needs: validate
     uses: ./.github/workflows/package-macos.yml
+    with:
+      release: true
     secrets: inherit
 
   package-windows:
     name: Package Windows
     needs: validate
     uses: ./.github/workflows/package-windows.yml
+    with:
+      release: true
     secrets: inherit
 
   publish:
