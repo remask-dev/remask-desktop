@@ -8,8 +8,7 @@ on:
         required: false
         type: boolean
         default: true
-  push:
-    tags: ["v*"]
+  workflow_call:
 
 jobs:
   package-windows-x64:
@@ -40,12 +39,16 @@ jobs:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
           requested=0
-          if [[ "${{ github.event_name }}" == "push" || "${{ inputs.signed }}" == "true" ]]; then requested=1; fi
+          if [[ "${{ github.event_name }}" == "workflow_call" || "${{ inputs.signed }}" == "true" ]]; then requested=1; fi
           if [[ "$requested" == 1 && -n "$WINDOWS_CERTIFICATE" && -n "$WINDOWS_CERTIFICATE_PASSWORD" && "$WINDOWS_CERTIFICATE_THUMBPRINT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
             echo "REMASK_SIGN_ENABLED=1" >> "$GITHUB_ENV"
             echo "Windows signing requested and credentials are present"
           else
             echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
+            if [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+              echo "Windows signing credentials are required for a Desktop Release" >&2
+              exit 1
+            fi
             echo "Windows signing unavailable; building unsigned package"
           fi
       - name: Import Windows signing certificate
@@ -70,6 +73,7 @@ jobs:
             "REMASK_SIGN_ENABLED=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
       - name: Build package
+        if: ${{ github.event_name != 'workflow_call' || env.REMASK_SIGN_ENABLED == '1' }}
         shell: bash
         env:
           REMASK_GO_CC: C:/msys64/mingw64/bin/gcc.exe
@@ -78,7 +82,9 @@ jobs:
           export REMASK_RELEASE=0 REMASK_SIGN=0
           if [[ "$REMASK_SIGN_ENABLED" == "1" ]]; then
             export REMASK_RELEASE=1 REMASK_SIGN=1
-            if ! npm run package:windows; then
+            if [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+              npm run package:windows
+            elif ! npm run package:windows; then
               echo "Signed Windows package failed; retrying unsigned"
               rm -rf artifacts/windows
               REMASK_RELEASE=0 REMASK_SIGN=0 npm run package:windows
@@ -95,3 +101,4 @@ jobs:
         with:
           name: remask-windows-x64-${{ github.sha }}
           path: artifacts/windows/x64/
+          if-no-files-found: error
