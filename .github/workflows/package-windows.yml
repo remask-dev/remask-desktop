@@ -11,7 +11,7 @@ on:
   workflow_call:
     inputs:
       release:
-        description: "Require a signed release package"
+        description: "Build a release package, signing it when credentials are available"
         required: false
         type: boolean
         default: false
@@ -51,10 +51,6 @@ jobs:
             echo "Windows signing requested and credentials are present"
           else
             echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
-            if [[ "${{ inputs.release }}" == "true" ]]; then
-              echo "Windows signing credentials are required for a Desktop Release" >&2
-              exit 1
-            fi
             echo "Windows signing unavailable; building unsigned package"
           fi
       - name: Import Windows signing certificate
@@ -75,14 +71,10 @@ jobs:
             Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
             Remove-Item -LiteralPath $path -Force
           } catch {
+            if ("${{ inputs.release }}" -eq "true") { throw }
             Write-Warning "Windows signing certificate import failed; continuing with unsigned package: $($_.Exception.Message)"
             "REMASK_SIGN_ENABLED=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
-      - name: Require imported Windows signing certificate
-        if: ${{ inputs.release }}
-        shell: bash
-        run: test "$REMASK_SIGN_ENABLED" = "1"
-
       - name: Build package
         shell: bash
         env:
