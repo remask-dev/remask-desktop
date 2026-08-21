@@ -1,0 +1,91 @@
+name: Verify macOS Signing
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-macos-signing:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_KEYCHAIN_PASSWORD"
+
+          certificate_path="$RUNNER_TEMP/remask-signing.p12"
+          keychain_path="$RUNNER_TEMP/remask-signing.keychain-db"
+
+          printf '%s' "$APPLE_CERTIFICATE" |
+            openssl base64 -d -A -out "$certificate_path"
+
+          security create-keychain \
+            -p "$APPLE_KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+
+          security set-keychain-settings \
+            -lut 21600 \
+            "$keychain_path"
+
+          security unlock-keychain \
+            -p "$APPLE_KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+
+          security import "$certificate_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$keychain_path"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$APPLE_KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+
+          security list-keychain \
+            -d user \
+            -s "$keychain_path" login.keychain-db
+
+          security default-keychain \
+            -s "$keychain_path"
+
+          rm -f "$certificate_path"
+
+      - name: Verify signing identity
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_SIGNING_IDENTITY"
+          security find-identity -v -p codesigning
+          security find-identity -v -p codesigning |
+            grep -F "$APPLE_SIGNING_IDENTITY"
+
+      - name: Verify notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APPLE_ID"
+          test -n "$APPLE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+
+          xcrun notarytool history \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            >/dev/null
+
+          echo "Apple signing and notarization credentials are valid"
