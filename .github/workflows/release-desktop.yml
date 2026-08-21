@@ -114,5 +114,5 @@ jobs:
             --repo "$REPOSITORY" \
             --verify-tag \
             --title "Remask Desktop ${version}" \
-            --generate-notes \
+            --notes "Remask Desktop ${version}" \
             release-upload/*

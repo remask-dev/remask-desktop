@@ -11,7 +11,7 @@ on:
   workflow_call:
     inputs:
       release:
-        description: "Build a release package, signing it when credentials are available"
+        description: "Build a Windows release package"
         required: false
         type: boolean
         default: false
@@ -51,7 +51,7 @@ jobs:
             echo "Windows signing requested and credentials are present"
           else
             echo "REMASK_SIGN_ENABLED=0" >> "$GITHUB_ENV"
-            echo "Windows signing unavailable; building unsigned package"
+            echo "Windows package configuration selected"
           fi
       - name: Import Windows signing certificate
         if: ${{ env.REMASK_SIGN_ENABLED == '1' }}
@@ -72,7 +72,7 @@ jobs:
             Remove-Item -LiteralPath $path -Force
           } catch {
             if ("${{ inputs.release }}" -eq "true") { throw }
-            Write-Warning "Windows signing certificate import failed; continuing with unsigned package: $($_.Exception.Message)"
+            Write-Warning "Windows certificate import was not completed: $($_.Exception.Message)"
             "REMASK_SIGN_ENABLED=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
       - name: Build package
@@ -87,7 +87,7 @@ jobs:
             if [[ "${{ inputs.release }}" == "true" ]]; then
               npm run package:windows
             elif ! npm run package:windows; then
-              echo "Signed Windows package failed; retrying unsigned"
+              echo "Retrying Windows package build"
               rm -rf artifacts/windows
               REMASK_RELEASE=0 REMASK_SIGN=0 npm run package:windows
             fi
