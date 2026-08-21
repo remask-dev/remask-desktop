@@ -194,6 +194,27 @@ The GitHub workflow expects `WINDOWS_CERTIFICATE` (Base64 PFX),
 It imports the PFX before building and rejects installers whose Authenticode
 signature is not valid.
 
+### GitHub Desktop Release
+
+Desktop Releases are published by `.github/workflows/release-desktop.yml`.
+Before publishing, set the same semantic version in
+`remask-desktop/package.json`, `remask-desktop/src-tauri/tauri.conf.json`, and
+`remask-desktop/src-tauri/Cargo.toml`. Commit the change, create the matching
+tag, and push it:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow validates the tag and version, runs the reusable macOS and
+Windows packaging workflows with their signing secrets, verifies that both
+platform artifacts and checksum files are present, and creates a published
+`Remask Desktop <version>` Release containing the DMG, Windows installer, and
+checksums. The standalone `Package macOS` and `Package Windows` workflows are
+still available through **workflow_dispatch** for build-only checks; those
+manual runs upload Actions Artifacts and do not create a Release.
+
 ## Offline license public key
 
 The Base64 Ed25519 verification key and its stable identifier are stored in

@@ -1,0 +1,118 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches desktop version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./remask-desktop/package.json').version")"
+          tauri_version="$(node -p "require('./remask-desktop/src-tauri/tauri.conf.json').version")"
+          cargo_version="$(awk -F ' *= *' '/^version *=/ { gsub(/"/, "", $2); print $2; exit }' remask-desktop/src-tauri/Cargo.toml)"
+          expected_tag="v${version}"
+          [[ "$RELEASE_TAG" == "$expected_tag" ]] || {
+            echo "release tag $RELEASE_TAG does not match package version $version (expected $expected_tag)" >&2
+            exit 1
+          }
+          [[ "$version" == "$tauri_version" && "$version" == "$cargo_version" ]] || {
+            echo "desktop versions differ: package=$version tauri=$tauri_version cargo=$cargo_version" >&2
+            exit 1
+          }
+
+  package-macos:
+    name: Package macOS
+    needs: validate
+    uses: ./.github/workflows/package-macos.yml
+    secrets: inherit
+
+  package-windows:
+    name: Package Windows
+    needs: validate
+    uses: ./.github/workflows/package-windows.yml
+    secrets: inherit
+
+  publish:
+    name: Publish Desktop Release
+    needs: [package-macos, package-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: remask-macos-${{ github.sha }}
+          path: release-assets/macos
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: remask-windows-x64-${{ github.sha }}
+          path: release-assets/windows
+
+      - name: Prepare release assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p release-upload
+
+          while IFS= read -r -d '' file; do
+            cp "$file" "release-upload/$(basename "$file")"
+          done < <(find release-assets -type f \( -name '*.dmg' -o -name '*.exe' \) -print0)
+
+          checksum_count=0
+          while IFS= read -r -d '' checksum; do
+            platform="$(basename "$(dirname "$(dirname "$(dirname "$checksum")")")")"
+            arch="$(basename "$(dirname "$(dirname "$checksum")")")"
+            cp "$checksum" "release-upload/Remask-${platform}-${arch}-${version}-SHA256SUMS"
+            checksum_count=$((checksum_count + 1))
+          done < <(find release-assets -type f -name SHA256SUMS -print0)
+
+          shopt -s nullglob
+          packages=(release-upload/*.dmg release-upload/*.exe)
+          (( ${#packages[@]} == 2 )) || {
+            echo "expected one DMG and one Windows installer, found ${#packages[@]}" >&2
+            find release-assets -maxdepth 5 -type f -print >&2
+            exit 1
+          }
+          (( checksum_count == 2 )) || {
+            echo "expected two platform checksum files, found $checksum_count" >&2
+            exit 1
+          }
+          sha256sum release-upload/* > release-upload/SHA256SUMS
+          ls -l release-upload
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          gh release create "$RELEASE_TAG" \
+            --repo "$REPOSITORY" \
+            --verify-tag \
+            --title "Remask Desktop ${version}" \
+            --generate-notes \
+            release-upload/*

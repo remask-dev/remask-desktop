@@ -2,9 +2,7 @@ name: Package Windows
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
 
 jobs:
   package-windows-x64:
