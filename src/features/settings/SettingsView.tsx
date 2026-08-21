@@ -178,10 +178,21 @@ function SettingsContent({ data }: { data: SettingsData }) {
       if (inTauri) {
         await invoke("open_purchase_page", { deviceId: license.device_id });
       } else {
-        const url = new URL(import.meta.env.VITE_PURCHASE_URL || "https://remask.app/buy");
+        const url = new URL(import.meta.env.VITE_PURCHASE_URL || "https://remask.dev");
         url.searchParams.set("product", "remask-desktop");
         url.searchParams.set("device_id", license.device_id);
         window.open(url, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      notify(String(error));
+    }
+  }
+  async function openOfficialWebsite() {
+    try {
+      if (inTauri) {
+        await invoke("open_official_website");
+      } else {
+        window.open("https://remask.dev", "_blank", "noopener,noreferrer");
       }
     } catch (error) {
       notify(String(error));
@@ -208,7 +219,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
 
   return <div className="settings-page"><div className="settings-grid">
     <SettingsSection tone="interface" title={t("applicationSettings")} subtitle={t("applicationSettingsSub")}>
-      <SettingRow label={t("language")} description={localeConfig[locale].displayName}><Select className="settings-control" value={locale} onValueChange={value => { const next = resolveLocale(value); if (next) setLocale(next); }} options={localeOptions}/></SettingRow>
+      <SettingRow last={!inTauri} label={t("language")} description={localeConfig[locale].displayName}><Select className="settings-control" value={locale} onValueChange={value => { const next = resolveLocale(value); if (next) setLocale(next); }} options={localeOptions}/></SettingRow>
       {inTauri && <SettingRow last label={t("autostart")} description={t("autostartSub")}><Switch ariaLabel={t("autostart")} disabled={!autostartReady} checked={autostart} onCheckedChange={toggleAutostart}/></SettingRow>}
     </SettingsSection>
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
@@ -235,6 +246,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
     </SettingsSection>
     {licenseSection}
     <Dialog open={clear} title={t("confirmClear")} onClose={() => setClear(false)} footer={<><Button onClick={() => setClear(false)}>{t("cancel")}</Button><Button variant="danger" onClick={() => clearMutation.mutate()}>{t("confirm")}</Button></>}><p className="dialog-message">{t("clearLogs")}</p></Dialog>
+    <footer className="settings-footer"><a className="settings-link" href="https://remask.dev" target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); void openOfficialWebsite(); }}>remask.dev</a></footer>
   </div></div>;
 }
 

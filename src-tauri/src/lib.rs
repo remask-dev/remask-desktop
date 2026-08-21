@@ -17,7 +17,8 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
-const DEFAULT_PURCHASE_URL: &str = "https://remask.app/buy";
+const OFFICIAL_WEBSITE_URL: &str = "https://remask.dev";
+const DEFAULT_PURCHASE_URL: &str = OFFICIAL_WEBSITE_URL;
 
 mod system_integration;
 
@@ -558,6 +559,14 @@ fn open_purchase_page(app: AppHandle, device_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_official_website(app: AppHandle) -> Result<(), String> {
+    #[allow(deprecated)]
+    app.shell()
+        .open(OFFICIAL_WEBSITE_URL, None)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn set_tray_locale(app: AppHandle, locale: String) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
@@ -829,6 +838,7 @@ pub fn run() {
             launch_app_with_proxy,
             launch_preset_with_proxy,
             open_purchase_page,
+            open_official_website,
             set_tray_locale
         ])
         .build(tauri::generate_context!())

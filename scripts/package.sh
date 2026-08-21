@@ -531,7 +531,11 @@ fi
 # beside the application executable. Map those DLLs to the installation root
 # instead of Tauri's normal resources/ directory.
 if [[ "$platform" == "windows" ]]; then
-  windows_resource_map="\"resources/models/**/*\":\"resources/models/\",\"resources/onnxruntime/**/*\":\"resources/onnxruntime/\",\"resources/windows-runtime/*.dll\":\"\""
+  # Map model and runtime directories instead of globbing their files. Tauri
+  # flattens glob matches into the mapped destination, which would otherwise
+  # turn resources/models/<model-id>/manifest.json into
+  # resources/models/manifest.json and make Core unable to discover it.
+  windows_resource_map="\"resources/models\":\"resources/models\",\"resources/onnxruntime\":\"resources/onnxruntime\",\"resources/windows-runtime/*.dll\":\"\""
   if [[ "$target" == "x86_64-pc-windows-gnullvm" ]]; then
     windows_resource_map+=",\"target/$target/release/WebView2Loader.dll\":\"\""
   fi

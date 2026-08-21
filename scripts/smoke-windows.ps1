@@ -23,10 +23,13 @@ try {
   $core = Join-Path $installDir "remask-core.exe"
   $runtime = Join-Path $installDir "resources\onnxruntime\onnxruntime.dll"
   $models = Join-Path $installDir "resources\models"
+  $modelManifest = Join-Path $models "$ModelID\manifest.json"
+  $managedModels = Join-Path $dataDir "models"
   $required = @(
     $desktop,
     $core,
     $runtime,
+    $modelManifest,
     (Join-Path $installDir "msvcp140.dll"),
     (Join-Path $installDir "msvcp140_1.dll"),
     (Join-Path $installDir "vcruntime140.dll"),
@@ -40,7 +43,8 @@ try {
 
   $coreArguments = @(
     "-self-test",
-    "-models-dir", $models,
+    "-models-dir", $managedModels,
+    "-builtin-models-dir", $models,
     "-active-model", $ModelID,
     "-onnxruntime-lib", $runtime,
     "-onnx-provider", "cpu",
