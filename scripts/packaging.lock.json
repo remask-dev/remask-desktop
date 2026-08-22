@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "core": {
     "repository": "remask-dev/remask-core-dist",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "manifestAsset": "manifest.json",
     "apiVersion": "v1",
-    "manifestSha256": "6430671154f4abd23abff921d3644c88296b1f584052648e1233e2bf7cfd1e0c"
+    "manifestSha256": "58495f087da955c0e3fba7f03214a5a585cc34fb0a8f25cc1ed8ed86f22ca9ad"
   },
   "onnxRuntime": {
     "version": "1.28.0",

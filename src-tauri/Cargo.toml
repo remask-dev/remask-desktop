@@ -1,6 +1,6 @@
 [package]
 name = "remask-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Remask desktop privacy gateway"
 authors = ["Remask"]
 edition = "2021"
