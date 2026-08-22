@@ -18,7 +18,7 @@ use tauri_plugin_shell::{
 };
 
 const OFFICIAL_WEBSITE_URL: &str = "https://remask.dev";
-const DEFAULT_PURCHASE_URL: &str = OFFICIAL_WEBSITE_URL;
+const DEFAULT_PURCHASE_URL: &str = "https://remask.app/license/";
 
 mod system_integration;
 
