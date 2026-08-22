@@ -7,7 +7,7 @@ export const entityFriendlyLabels = {
 
 export const messages = {
   zh: {
-    advancedRequired:"此功能仅高级版可用，请先激活授权。", advancedFeatureHint:"仅高级版可用。", advancedPlanBadge:"高级版",
+    proRequired:"此功能仅专业版可用，请先激活授权。", proFeatureHint:"仅专业版可用。", proPlanBadge:"专业版", freePlanBadge:"免费版", licenseType:"授权类型：",
     licenseSettings:"授权与激活", licenseSettingsSub:"授权绑定当前设备，导入后可完全离线使用。", licenseStatus:"授权状态", licenseMissing:"未激活", licenseValid:"已激活", licenseExpired:"已过期", licenseNotYetValid:"尚未生效", licenseDeviceMismatch:"设备不匹配", licenseInvalid:"授权文件无效", licenseKeyUnconfigured:"未配置签名公钥", licenseDeviceUnavailable:"无法获取设备 ID", deviceId:"设备 ID", deviceIdSub:"购买授权时用于绑定当前设备。", deviceIdCopied:"设备 ID 已复制", licenseEmail:"授权邮箱", licenseEmailSub:"授权购买者的联系邮箱。", licenseExpiresAt:"授权有效期", licenseExpiresAtSub:"授权在此日期到期；续费后重新导入文件即可。", importLicense:"导入授权文件", licenseImporting:"正在导入…", licenseImported:"授权文件已导入", licenseFileSizeInvalid:"授权文件必须小于 64 KiB", buyLicense:"购买授权", notAvailable:"不可用",
     applicationSettings:"应用设置", applicationSettingsSub:"管理显示语言和应用启动行为。", modelSettings:"模型配置", modelSettingsSub:"管理模型下载来源、本地推理规模和运行设备。", redactionSettings:"脱敏设置", redactionSettingsSub:"管理脱敏内容范围和实体识别缓存。",
     quickLaunchAction:"安全启动", chooseAnotherApp:"通过安全网关启动应用", desktopAppRequired:"请在 Remask 桌面应用中使用安全启动。",
@@ -31,7 +31,7 @@ export const messages = {
   },
   en: {
     openCode:"OpenCode",
-    advancedRequired:"This feature requires an active Advanced license.", advancedFeatureHint:"Advanced only.", advancedPlanBadge:"Advanced",
+    proRequired:"This feature requires an active Pro license.", proFeatureHint:"Pro only.", proPlanBadge:"Pro", freePlanBadge:"Free", licenseType:"License:",
     licenseSettings:"License & activation", licenseSettingsSub:"Licenses are bound to this device and work fully offline after import.", licenseStatus:"License status", licenseMissing:"Not activated", licenseValid:"Activated", licenseExpired:"Expired", licenseNotYetValid:"Not active yet", licenseDeviceMismatch:"Device mismatch", licenseInvalid:"Invalid license file", licenseKeyUnconfigured:"Signing key not configured", licenseDeviceUnavailable:"Device ID unavailable", deviceId:"Device ID", deviceIdSub:"Used to bind a purchased license to this device.", deviceIdCopied:"Device ID copied", licenseEmail:"License email", licenseEmailSub:"Contact email associated with this license.", licenseExpiresAt:"License expiration", licenseExpiresAtSub:"Import a renewed license file when this license expires.", importLicense:"Import license", licenseImporting:"Importing…", licenseImported:"License imported", licenseFileSizeInvalid:"License files must be smaller than 64 KiB", buyLicense:"Buy license", notAvailable:"Unavailable",
     allowLanRequests:"Allow LAN requests", allowLanRequestsSub:"Allow devices on the same LAN to reach the API and proxy gateways. Use only on trusted networks.",
     recordRedactedContent:"Record redacted content", recordRedactedContentSub:"Metadata is still logged; redacted field content is not stored while disabled.",
@@ -56,9 +56,11 @@ export const messages = {
   },
   ja: {
     openCode:"OpenCode",
-    advancedRequired:"この機能にはアクティブな Advanced ライセンスが必要です。",
-    advancedFeatureHint:"上級のみ。",
-    advancedPlanBadge:"高度な",
+    proRequired:"この機能には有効な Pro ライセンスが必要です。",
+    proFeatureHint:"Pro 限定。",
+    proPlanBadge:"Pro",
+    freePlanBadge:"無料版",
+    licenseType:"ライセンス：",
     licenseSettings:"ライセンスとアクティベーション",
     licenseSettingsSub:"ライセンスはこのデバイスにバインドされており、インポート後は完全にオフラインで機能します。",
     licenseStatus:"ライセンスのステータス",
@@ -465,9 +467,11 @@ export const messages = {
   },
   de: {
     openCode:"OpenCode",
-    advancedRequired:"Für diese Funktion ist eine aktive Advanced-Lizenz erforderlich.",
-    advancedFeatureHint:"Nur für Fortgeschrittene.",
-    advancedPlanBadge:"Erweitert",
+    proRequired:"Für diese Funktion ist eine aktive Pro-Lizenz erforderlich.",
+    proFeatureHint:"Nur für Pro.",
+    proPlanBadge:"Pro",
+    freePlanBadge:"Kostenlos",
+    licenseType:"Lizenz:",
     licenseSettings:"Lizenz & Aktivierung",
     licenseSettingsSub:"Lizenzen sind an dieses Gerät gebunden und funktionieren nach dem Import vollständig offline.",
     licenseStatus:"Lizenzstatus",

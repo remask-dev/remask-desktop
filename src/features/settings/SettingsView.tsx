@@ -13,8 +13,8 @@ import { Input } from "../../shared/ui/Input";
 import { PageState } from "../../shared/ui/PageState";
 import { Select } from "../../shared/ui/Select";
 import { Switch } from "../../shared/ui/Switch";
-import { hasAdvancedLicense } from "../../shared/license";
-import { AdvancedBadge } from "../../shared/ui/Status";
+import { hasProLicense } from "../../shared/license";
+import { ProBadge } from "../../shared/ui/Status";
 import { localeConfig, localeOptions, resolveLocale } from "../../shared/i18n/locales";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -43,7 +43,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   const [allowLan, setAllowLan] = useState(connection.allowLan());
   const [gatewaySettingsReady, setGatewaySettingsReady] = useState(!inTauri);
   const [license, setLicense] = useState<LicenseState>(data.license);
-  const advanced = hasAdvancedLicense(license);
+  const pro = hasProLicense(license);
 
   useEffect(() => {
     if (!inTauri) return;
@@ -66,7 +66,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
           setHTTPProxyPort(httpPort);
           connection.saveForwardProxyPort(httpPort);
         }
-        const licensedAllowLan = saved.allow_lan && hasAdvancedLicense(data.license);
+        const licensedAllowLan = saved.allow_lan && hasProLicense(data.license);
         setAllowLan(licensedAllowLan);
         connection.saveAllowLan(licensedAllowLan);
       })
@@ -150,7 +150,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   function applyHFBaseURL() { const next = { ...audit, hf_base_url: hfBaseURL.trim() }; setAudit(next); saveAudit.mutate(next); }
   function applyGatewaySettings(nextAllowLan = allowLan) { if (!saveGatewaySettings.isPending) saveGatewaySettings.mutate({ apiPort: apiGatewayPort, httpPort: httpProxyPort, allowLan: nextAllowLan }); }
   function toggleAllowLan(next: boolean) {
-    if (next && !advanced) { notify(t("advancedRequired")); return; }
+    if (next && !pro) { notify(t("proRequired")); return; }
     setAllowLan(next); applyGatewaySettings(next);
   }
   async function copyDeviceID() {
@@ -207,7 +207,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
   };
   const licenseDate = license.expires_at ? new Intl.DateTimeFormat(localeConfig[locale].dateLocale, { dateStyle: "medium" }).format(new Date(license.expires_at)) : t("notAvailable");
   const licenseSection = <SettingsSection tone="license" title={t("licenseSettings")} subtitle={t("licenseSettingsSub")}>
-    <SettingRow label={t("licenseStatus")} description={license.status === "valid" && license.edition ? `${licenseStatusLabels[license.status]} · ${license.edition}` : licenseStatusLabels[license.status]}><span className={`license-status license-status--${license.status}`}>{licenseStatusLabels[license.status]}</span></SettingRow>
+    <SettingRow label={t("licenseStatus")} description={license.status === "valid" && license.edition ? `${licenseStatusLabels[license.status]} · ${pro ? t("proPlanBadge") : license.edition}` : licenseStatusLabels[license.status]}><span className={`license-status license-status--${license.status}`}>{licenseStatusLabels[license.status]}</span></SettingRow>
     <SettingRow label={t("deviceId")} description={t("deviceIdSub")}><button className="license-device" type="button" disabled={!license.device_id} onClick={() => void copyDeviceID()}><code>{license.device_id || t("notAvailable")}</code><small>{t("copy")}</small></button></SettingRow>
     {license.email ? <SettingRow label={t("licenseEmail")} description={t("licenseEmailSub")}><span className="license-email">{license.email}</span></SettingRow> : null}
     <SettingRow last label={t("licenseExpiresAt")} description={t("licenseExpiresAtSub")}><time className="license-expiry" dateTime={license.expires_at}>{licenseDate}</time></SettingRow>
@@ -225,7 +225,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
     <SettingsSection tone="gateway" title={t("gatewaySettings")} subtitle={t("gatewaySettingsSub")}>
       <SettingRow label={t("apiGatewayPort")} description={t("apiGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} value={apiGatewayPort} onChange={event => setAPIGatewayPort(Number(event.target.value))} onBlur={() => applyGatewaySettings()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
       <SettingRow label={t("proxyGatewayPort")} description={t("proxyGatewayPortSub")}><Input className="settings-control" type="number" min={1} max={65535} disabled={!gatewaySettingsReady || saveGatewaySettings.isPending} value={httpProxyPort} onChange={event => setHTTPProxyPort(Number(event.target.value))} onBlur={() => applyGatewaySettings()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
-      <SettingRow last label={<LabelWithBadge label={t("allowLanRequests")} badge={t("advancedPlanBadge")}/>} description={t("allowLanRequestsSub")}><Switch ariaLabel={t("allowLanRequests")} disabled={!advanced || !gatewaySettingsReady || saveGatewaySettings.isPending} checked={advanced && allowLan} onCheckedChange={toggleAllowLan}/></SettingRow>
+      <SettingRow last label={<LabelWithBadge label={t("allowLanRequests")} badge={t("proPlanBadge")}/>} description={t("allowLanRequestsSub")}><Switch ariaLabel={t("allowLanRequests")} disabled={!pro || !gatewaySettingsReady || saveGatewaySettings.isPending} checked={pro && allowLan} onCheckedChange={toggleAllowLan}/></SettingRow>
     </SettingsSection>
     <SettingsSection tone="models" title={t("modelSettings")} subtitle={t("modelSettingsSub")}>
       <SettingRow label={t("hfMirror")} description={t("hfMirrorSub")}><Input className="settings-control" placeholder="https://huggingface.co" value={hfBaseURL} onChange={event => setHFBaseURL(event.target.value)} onBlur={applyHFBaseURL} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></SettingRow>
@@ -240,7 +240,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
     </SettingsSection>
     <SettingsSection tone="logs" title={t("audit")} subtitle={t("auditSub")}>
       <SettingRow label={t("recordRedactedContent")} description={t("recordRedactedContentSub")}><Switch ariaLabel={t("recordRedactedContent")} disabled={saveAudit.isPending} checked={audit.record_request_content} onCheckedChange={record_request_content => updateAudit({ record_request_content })}/></SettingRow>
-	  <SettingRow label={<LabelWithBadge label={t("recordRawRequest")} badge={t("advancedPlanBadge")}/>} description={t("recordRawRequestSub")}><Switch ariaLabel={t("recordRawRequest")} disabled={!advanced || saveAudit.isPending} checked={advanced && audit.record_raw_request} onCheckedChange={record_raw_request => updateAudit({ record_raw_request })}/></SettingRow>
+	  <SettingRow label={<LabelWithBadge label={t("recordRawRequest")} badge={t("proPlanBadge")}/>} description={t("recordRawRequestSub")}><Switch ariaLabel={t("recordRawRequest")} disabled={!pro || saveAudit.isPending} checked={pro && audit.record_raw_request} onCheckedChange={record_raw_request => updateAudit({ record_raw_request })}/></SettingRow>
       <SettingRow last label={t("retention")} description={t("retentionSub")}><Select className="settings-control" value={String(audit.retention_days)} onValueChange={value => updateAudit({ retention_days: Number(value) })} options={[7, 30, 90, 180].map(value => ({ value: String(value), label: `${value} ${t("days")}` }))}/></SettingRow>
       <div className="settings-actions settings-actions--split"><Button variant="danger" onClick={() => setClear(true)}>{t("clearLogs")}</Button></div>
     </SettingsSection>
@@ -256,4 +256,4 @@ function SettingsSection({ tone, title, subtitle, children }: { tone: string; ti
 function SettingRow({ label, description, children, last = false }: { label: React.ReactNode; description: string; children: React.ReactNode; last?: boolean }) {
   return <div className={`setting-row ${last ? "setting-row--last" : ""}`}><span><strong>{label}</strong><small>{description}</small></span>{children}</div>;
 }
-function LabelWithBadge({ label, badge }: { label: string; badge: string }) { return <span className="setting-label-with-badge">{label}<AdvancedBadge>{badge}</AdvancedBadge></span>; }
+function LabelWithBadge({ label, badge }: { label: string; badge: string }) { return <span className="setting-label-with-badge">{label}<ProBadge>{badge}</ProBadge></span>; }

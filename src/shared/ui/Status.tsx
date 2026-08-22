@@ -9,4 +9,4 @@ const badge = cva("inline-flex w-max items-center rounded-md px-1.5 py-1 font-mo
 } }, defaultVariants: { tone: "neutral" } });
 export function StatusDot({ tone = "muted", className }: { tone?: "success" | "warning" | "error" | "muted"; className?: string }) { return <i className={cn(dot({tone}),className)} aria-hidden="true"/>; }
 export function Badge({ tone = "neutral", children }: { tone?: "success" | "warning" | "error" | "neutral"; children: React.ReactNode }) { return <span className={cn(badge({tone}))}>{children}</span>; }
-export function AdvancedBadge({ children = "高级版" }: { children?: React.ReactNode }) { return <span className="advanced-badge">{children}</span>; }
+export function ProBadge({ children = "专业版" }: { children?: React.ReactNode }) { return <span className="pro-badge">{children}</span>; }

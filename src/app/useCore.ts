@@ -69,6 +69,16 @@ export function useCore() {
     refetchInterval: online ? 15_000 : false,
     retry: false,
   });
+  const license = useQuery({
+    queryKey: queryKeys.license,
+    queryFn: coreApi.license,
+    enabled: online,
+    networkMode: "always",
+    initialData: { device_id: "", status: "missing" } as LicenseState,
+    initialDataUpdatedAt: 0,
+    refetchInterval: online ? 60_000 : false,
+    retry: false,
+  });
 
   useEffect(() => {
     if (online) setStarting(false);
@@ -86,6 +96,7 @@ export function useCore() {
   return {
     version,
     policy,
+    license,
     status,
     markStarting,
     markOffline,

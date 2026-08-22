@@ -11,8 +11,8 @@ import { Input } from "../../shared/ui/Input";
 import { Switch } from "../../shared/ui/Switch";
 import { PageState } from "../../shared/ui/PageState";
 import { entityFriendlyLabels, type MessageKey } from "../../shared/i18n/messages";
-import { FREE_CUSTOM_RULE_LIMIT, hasAdvancedLicense } from "../../shared/license";
-import { AdvancedBadge } from "../../shared/ui/Status";
+import { FREE_CUSTOM_RULE_LIMIT, hasProLicense } from "../../shared/license";
+import { ProBadge } from "../../shared/ui/Status";
 
 const blankRule = (): RuleConfig => ({ id: `RULE_${Date.now()}`, pattern: "", enabled: true });
 const builtInTypes = ["ACCOUNT_NUMBER", "ADDRESS", "PRIVATE_DATE", "EMAIL_ADDRESS", "PERSON", "PHONE_NUMBER", "URL", "SECRET"];
@@ -46,10 +46,10 @@ function entityLabel(locale: keyof typeof entityFriendlyLabels, t: (key: Message
 export function Rules() {
   const query = useRulesData();
   if (query.isPending || !query.policy || !query.models) return <PageState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}/>;
-  return <RulesContent data={{ policy: query.policy, models: query.models.models, advanced: hasAdvancedLicense(query.license) }}/>;
+  return <RulesContent data={{ policy: query.policy, models: query.models.models, pro: hasProLicense(query.license) }}/>;
 }
 
-function RulesContent({ data }: { data: { policy: PolicySettings; models: ModelPackage[]; advanced: boolean } }) {
+function RulesContent({ data }: { data: { policy: PolicySettings; models: ModelPackage[]; pro: boolean } }) {
   const { t, locale } = useI18n(); const { notify } = useApp();
   const qc = useQueryClient();
   const [policy, setPolicy] = useState<PolicySettings>(() => normalizePolicy(data.policy));
@@ -57,12 +57,12 @@ function RulesContent({ data }: { data: { policy: PolicySettings; models: ModelP
 	const customRuleCount = policy.rules.length;
 	const enabledRuleCount = policy.rules.filter(rule => rule.enabled).length;
 	const addRule = () => {
-		if (!data.advanced && policy.rules.length >= FREE_CUSTOM_RULE_LIMIT) {
-			notify(t("advancedRequired"));
+		if (!data.pro && policy.rules.length >= FREE_CUSTOM_RULE_LIMIT) {
+			notify(t("proRequired"));
 			return;
 		}
 		setPolicy(current => {
-			if (!data.advanced && current.rules.length >= FREE_CUSTOM_RULE_LIMIT) return current;
+			if (!data.pro && current.rules.length >= FREE_CUSTOM_RULE_LIMIT) return current;
 			return { ...current, rules: [...current.rules, blankRule()] };
 		});
 	};
@@ -103,7 +103,7 @@ function RulesContent({ data }: { data: { policy: PolicySettings; models: ModelP
   return <div className="rules-page">
     <section className="entity-controls"><div className="entity-controls__heading"><span className="rules-icon"><ShieldCheck size={17}/></span><div><h2>{t("entityProtection")}</h2><p>{t("entityProtectionSub")}</p></div></div><div className="entity-toggle-grid">{labels.map(entity => { const raw = entity.value.trim(); const label = entityLabel(locale, t, raw); const configured = policy.entity_types.find(item => item.type === raw); const enabled = configured?.enabled !== false; return <label key={raw || "unnamed-entity"} className={enabled ? "is-enabled" : ""}><span><strong>{label}</strong><code>{raw || "UNKNOWN"}</code></span><Switch ariaLabel={`${label} · ${raw || "UNKNOWN"}`} checked={enabled} onCheckedChange={checked => patchEntity(raw || "UNKNOWN", checked)}/></label>; })}</div></section>
     <section className="custom-rules">
-      <header className="rules-toolbar"><div><span className="rules-icon rules-icon--custom"><ListPlus size={17}/></span><div><h2 className="feature-title-with-badge">{t("customRules")}<AdvancedBadge>{t("advancedPlanBadge")}</AdvancedBadge></h2><p>{enabledRuleCount} / {customRuleCount} {t("enabled")}</p></div></div><Button icon={<Plus size={13}/>} onClick={addRule}>{t("addRule")}</Button></header>
+      <header className="rules-toolbar"><div><span className="rules-icon rules-icon--custom"><ListPlus size={17}/></span><div><h2 className="feature-title-with-badge">{t("customRules")}<ProBadge>{t("proPlanBadge")}</ProBadge></h2><p>{enabledRuleCount} / {customRuleCount} {t("enabled")}</p></div></div><Button icon={<Plus size={13}/>} onClick={addRule}>{t("addRule")}</Button></header>
       <div className="rules-container">
         <div className="rules-table"><header><span>{t("enabled")}</span><span>{t("ruleId")}</span><span>{t("expression")}</span><i/></header>{policy.rules.map((rule, index) => <article key={index}><Switch checked={rule.enabled} onCheckedChange={enabled => patchRule(index, { enabled })}/><Input value={rule.id} onChange={event => patchRule(index, { id: event.target.value.toUpperCase() })}/><Input className="font-mono" value={rule.pattern} onChange={event => patchRule(index, { pattern: event.target.value })}/><Button size="icon" variant="ghost" aria-label={t("remove")} onClick={() => setPolicy({ ...policy, rules: policy.rules.filter((_, current) => current !== index) })}><Trash2 size={13}/></Button></article>)}</div>
         <footer className="rules-footer"><Button variant="primary" onClick={() => void persist(policy, true)}>{t("saveRules")}</Button></footer>
