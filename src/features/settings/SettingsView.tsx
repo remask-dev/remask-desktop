@@ -178,7 +178,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
       if (inTauri) {
         await invoke("open_purchase_page", { deviceId: license.device_id });
       } else {
-        const url = new URL(import.meta.env.VITE_PURCHASE_URL || "https://remask.app/license/");
+        const url = new URL(import.meta.env.VITE_PURCHASE_URL || "https://remask.dev/license/");
         url.searchParams.set("product", "remask-desktop");
         url.searchParams.set("device_id", license.device_id);
         window.open(url, "_blank", "noopener,noreferrer");
