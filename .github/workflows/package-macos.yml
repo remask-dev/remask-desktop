@@ -28,10 +28,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/cache@v4
-        with:
-          path: .cache
-          key: macos-package-inputs-${{ hashFiles('scripts/packaging.lock.json') }}
       - run: npm ci
       - name: Require pinned Core release
         run: node -e 'const lock=require("./scripts/packaging.lock.json"); if (!lock.core?.version || lock.core.version === "latest" || !/^[0-9]+\.[0-9]+\.[0-9]+/.test(lock.core.version) || !/^[a-f0-9]{64}$/i.test(lock.core.manifestSha256 || "")) throw new Error("pin Core version and manifestSha256 before release")'
@@ -110,3 +106,6 @@ jobs:
           name: remask-macos-${{ github.sha }}
           path: artifacts/macos/
           if-no-files-found: error
+          # The release workflow consumes this immediately; retain it briefly
+          # in case the publish job needs to be re-run.
+          retention-days: 3
