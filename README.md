@@ -8,6 +8,8 @@ Remask sits between your AI clients and AI providers. It detects sensitive infor
 
 Use Remask with AI coding assistants, desktop apps, browsers, SDKs, scripts, and internal tools—without sending raw personal or confidential data directly to an AI service.
 
+![Remask Desktop overview showing privacy protection status and request activity](docs/images/demo.gif)
+
 ## Why Remask
 
 AI workflows often include names, email addresses, account details, credentials, customer records, source code, and other sensitive context. Manually removing that information is slow and easy to forget.
